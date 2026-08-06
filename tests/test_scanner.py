@@ -20,12 +20,16 @@ class ScannerTests(unittest.TestCase):
     @patch("photoscanner.scanner.subprocess.run")
     def test_lists_devices(self, run, _which) -> None:
         run.return_value = FakeResult(
-            stdout="airscan:e0:Scanner\tEpson\tET-4850\tflatbed scanner\n"
+            stdout=(
+                "v4l:/dev/video0\tNoname\tIntegrated Camera\tvirtual device\n"
+                "airscan:e0:Scanner\tEpson\tET-4850\tflatbed scanner\n"
+            )
         )
         devices = list_devices()
         self.assertEqual(1, len(devices))
         self.assertEqual("airscan:e0:Scanner", devices[0].name)
         self.assertIn("Epson ET-4850", devices[0].label)
+        self.assertEqual("%d\t%v\t%m\t%t%n", run.call_args.args[0][2])
 
     @patch("photoscanner.scanner.shutil.which", return_value=None)
     def test_missing_scanimage_has_install_hint(self, _which) -> None:

@@ -40,7 +40,7 @@ def list_devices(timeout: int = 15) -> list[ScannerDevice]:
 
     try:
         result = subprocess.run(
-            ["scanimage", "-f", "%d\\t%v\\t%m\\t%t\\n"],
+            ["scanimage", "-f", "%d\t%v\t%m\t%t%n"],
             check=False,
             capture_output=True,
             text=True,
@@ -61,7 +61,12 @@ def list_devices(timeout: int = 15) -> list[ScannerDevice]:
             continue
         fields = line.split("\t")
         fields.extend([""] * (4 - len(fields)))
-        devices.append(ScannerDevice(*(field.strip() for field in fields[:4])))
+        device = ScannerDevice(*(field.strip() for field in fields[:4]))
+        # Das SANE-v4l-Backend meldet integrierte Webcams als Scanner. Für das
+        # Digitalisieren von Papierfotos sind diese Geräte ungeeignet und
+        # würden nur die Auswahl in der TUI verfälschen.
+        if not device.name.startswith("v4l:"):
+            devices.append(device)
     return devices
 
 
