@@ -35,9 +35,13 @@ gespeichert. Vor jedem Scan fragt die TUI nach dem Aufnahmedatum. Enter übernim
 das heutige Datum; historische Fotos können zum Beispiel mit `01.09.1995`
 versehen werden.
 
+Menüpunkt `2` speichert die gesamte Scanfläche als eine einzelne Datei. In
+diesem Modus findet keine Fotoerkennung, Trennung, Begradigung oder
+Vorschauanalyse statt.
+
 Der einmal ausgewählte Scanner bleibt für die laufende TUI-Sitzung gespeichert.
 Weitere Scans starten deshalb ohne erneute, langsame SANE-Gerätesuche. Menüpunkt
-`3` aktualisiert die Geräteliste weiterhin bewusst.
+`4` aktualisiert die Geräteliste weiterhin bewusst.
 
 Für gute Ergebnisse:
 
@@ -65,6 +69,12 @@ Mit einem manuell gewählten Aufnahmedatum:
 
 ```bash
 .venv/bin/photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
+```
+
+Gesamte Scanfläche ohne Analyse speichern:
+
+```bash
+.venv/bin/photoscanner scan-full --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
 ```
 
 Eine vorhandene Datei trennen:

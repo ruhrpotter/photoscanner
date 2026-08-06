@@ -11,7 +11,7 @@ from rich.console import Console
 
 from . import __version__
 from .scanner import ScannerError, list_devices, scan_to_file
-from .splitter import SplitConfig, SplitError, split_scan
+from .splitter import SplitConfig, SplitError, save_full_scan, split_scan
 from .tui import PhotoScannerTui
 
 
@@ -24,10 +24,21 @@ def _date_argument(value: str) -> date:
         ) from exc
 
 
-def _add_split_options(parser: argparse.ArgumentParser) -> None:
+def _add_export_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-o", "--output", type=Path, default=Path("output"), help="Ausgabeordner")
     parser.add_argument("--format", choices=["jpg", "png", "tif"], default="jpg")
     parser.add_argument("--quality", type=int, default=95, help="JPEG-Qualität (1-100)")
+    parser.add_argument("--prefix", help="Dateinamen-Präfix")
+    parser.add_argument(
+        "--date",
+        type=_date_argument,
+        metavar="TT.MM.JJJJ",
+        help="Aufnahmedatum für EXIF, Dateiname und Datei-Zeitstempel (Standard: heute)",
+    )
+
+
+def _add_split_options(parser: argparse.ArgumentParser) -> None:
+    _add_export_options(parser)
     parser.add_argument(
         "--min-area",
         type=float,
@@ -49,14 +60,12 @@ def _add_split_options(parser: argparse.ArgumentParser) -> None:
         metavar="PROZENT",
         help="Zusätzlicher Rand je Seite (Standard: 1.2)",
     )
-    parser.add_argument("--prefix", help="Dateinamen-Präfix")
-    parser.add_argument(
-        "--date",
-        type=_date_argument,
-        metavar="TT.MM.JJJJ",
-        help="Aufnahmedatum für EXIF, Dateiname und Datei-Zeitstempel (Standard: heute)",
-    )
     parser.add_argument("--no-preview", action="store_true", help="Kein markiertes Vorschaubild")
+
+
+def _add_scanner_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--device", help="SANE-Gerätename; sonst erstes erkanntes Gerät")
+    parser.add_argument("--dpi", type=int, default=600, help="Scanauflösung (Standard: 600)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,17 +83,22 @@ def build_parser() -> argparse.ArgumentParser:
     _add_split_options(split_parser)
 
     scan_parser = subparsers.add_parser("scan", help="Scannen und Ergebnis aufteilen")
-    scan_parser.add_argument("--device", help="SANE-Gerätename; sonst erstes erkanntes Gerät")
-    scan_parser.add_argument("--dpi", type=int, default=600, help="Scanauflösung (Standard: 600)")
+    _add_scanner_options(scan_parser)
     _add_split_options(scan_parser)
+
+    full_parser = subparsers.add_parser(
+        "scan-full", help="Gesamte Scanfläche ohne Fotoanalyse speichern"
+    )
+    _add_scanner_options(full_parser)
+    _add_export_options(full_parser)
     return parser
 
 
 def _config_from_args(args: argparse.Namespace, *, scanned: bool = False) -> SplitConfig:
     return SplitConfig(
-        min_area_percent=args.min_area,
-        threshold=args.threshold,
-        padding_percent=args.padding,
+        min_area_percent=getattr(args, "min_area", 2.0),
+        threshold=getattr(args, "threshold", None),
+        padding_percent=getattr(args, "padding", 1.2),
         output_format=args.format,
         jpeg_quality=args.quality,
         dpi=args.dpi if scanned else None,
@@ -129,26 +143,37 @@ def main(argv: list[str] | None = None) -> int:
             _print_result(console, result)
             return 0
 
-        devices = list_devices()
         if args.device:
             device_name = args.device
-        elif devices:
+        else:
+            devices = list_devices()
+            if not devices:
+                raise ScannerError("SANE hat keinen Scanner gefunden.")
             device_name = devices[0].name
             console.print(f"Verwende Scanner: {devices[0].label}")
-        else:
-            raise ScannerError("SANE hat keinen Scanner gefunden.")
         with TemporaryDirectory(prefix="photoscanner-") as temporary:
             scan_path = Path(temporary) / "scan.png"
             console.print(f"Scanne mit {args.dpi} dpi ...")
             scan_to_file(scan_path, device=device_name, dpi=args.dpi)
-            result = split_scan(
-                scan_path,
-                args.output,
-                _config_from_args(args, scanned=True),
-                prefix=args.prefix,
-                save_preview=not args.no_preview,
-            )
-        _print_result(console, result)
+            if args.command == "scan-full":
+                output = save_full_scan(
+                    scan_path,
+                    args.output,
+                    _config_from_args(args, scanned=True),
+                    prefix=args.prefix,
+                )
+            else:
+                result = split_scan(
+                    scan_path,
+                    args.output,
+                    _config_from_args(args, scanned=True),
+                    prefix=args.prefix,
+                    save_preview=not args.no_preview,
+                )
+        if args.command == "scan-full":
+            console.print(f"[bold green]Vollständiger Scan gespeichert:[/bold green]\n{output}")
+        else:
+            _print_result(console, result)
         return 0
     except (ScannerError, SplitError, ValueError) as exc:
         Console(stderr=True).print(f"[bold red]Fehler:[/bold red] {exc}")

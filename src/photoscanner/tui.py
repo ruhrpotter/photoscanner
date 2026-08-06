@@ -13,7 +13,7 @@ from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 from .scanner import ScannerDevice, ScannerError, list_devices, scan_to_file
-from .splitter import SplitConfig, SplitError, SplitResult, split_scan
+from .splitter import SplitConfig, SplitError, SplitResult, save_full_scan, split_scan
 
 
 @dataclass(slots=True)
@@ -53,21 +53,25 @@ class PhotoScannerTui:
         self.console.print(
             Panel.fit(
                 "[bold cyan]Photo Scanner[/bold cyan]\n"
-                "Mehrere Papierfotos scannen, erkennen und einzeln speichern",
+                "Scanfläche vollständig speichern oder Papierfotos automatisch trennen",
                 border_style="cyan",
             )
         )
         while True:
             self._show_menu()
-            choice = Prompt.ask("Auswahl", choices=["1", "2", "3", "4", "q"], default="1")
+            choice = Prompt.ask(
+                "Auswahl", choices=["1", "2", "3", "4", "5", "q"], default="1"
+            )
             try:
                 if choice == "1":
                     self._scan_and_split()
                 elif choice == "2":
-                    self._split_file()
+                    self._scan_without_analysis()
                 elif choice == "3":
-                    self._show_devices()
+                    self._split_file()
                 elif choice == "4":
+                    self._show_devices()
+                elif choice == "5":
                     self._edit_settings()
                 else:
                     self.console.print("Bis bald.")
@@ -80,9 +84,10 @@ class PhotoScannerTui:
     def _show_menu(self) -> None:
         self.console.print()
         self.console.print("[bold]1[/bold]  Scanner einlesen und Fotos trennen")
-        self.console.print("[bold]2[/bold]  Vorhandene Scandatei trennen")
-        self.console.print("[bold]3[/bold]  Erkannte Scanner anzeigen")
-        self.console.print("[bold]4[/bold]  Einstellungen")
+        self.console.print("[bold]2[/bold]  Gesamte Scanfläche speichern (ohne Analyse)")
+        self.console.print("[bold]3[/bold]  Vorhandene Scandatei trennen")
+        self.console.print("[bold]4[/bold]  Erkannte Scanner anzeigen")
+        self.console.print("[bold]5[/bold]  Einstellungen")
         self.console.print("[bold]q[/bold]  Beenden")
 
     def _choose_device(self, devices: list[ScannerDevice]) -> ScannerDevice:
@@ -123,18 +128,7 @@ class PhotoScannerTui:
             return
         with TemporaryDirectory(prefix="photoscanner-") as temporary:
             scan_path = Path(temporary) / "scan.png"
-            try:
-                with self.console.status(f"Scanne mit {self.settings.dpi} dpi ..."):
-                    scan_to_file(
-                        scan_path,
-                        device=device.name,
-                        dpi=self.settings.dpi,
-                    )
-            except ScannerError:
-                # Nach einem Verbindungsfehler wird beim nächsten Versuch neu
-                # gesucht, statt ein nicht mehr erreichbares Gerät festzuhalten.
-                self._remembered_device = None
-                raise
+            self._acquire_scan(scan_path, device)
             with self.console.status("Erkenne und begradige Fotos ..."):
                 result = split_scan(
                     scan_path,
@@ -142,6 +136,38 @@ class PhotoScannerTui:
                     self.settings.split_config(scanned=True, capture_date=capture_date),
                 )
         self._show_result(result)
+
+    def _scan_without_analysis(self) -> None:
+        device = self._device_for_scan()
+        self.console.print("\nLege das Foto oder Dokument auf das Scanbett.")
+        capture_date = self._ask_capture_date()
+        if not Confirm.ask("Vollständigen Scan starten?", default=True):
+            return
+        with TemporaryDirectory(prefix="photoscanner-") as temporary:
+            scan_path = Path(temporary) / "scan.png"
+            self._acquire_scan(scan_path, device)
+            with self.console.status("Speichere vollständige Scanfläche ..."):
+                output = save_full_scan(
+                    scan_path,
+                    self.settings.output_directory,
+                    self.settings.split_config(scanned=True, capture_date=capture_date),
+                )
+        self.console.print(f"\n[bold green]Fertig: vollständiger Scan gespeichert.[/bold green]")
+        self.console.print(f"  {output}")
+
+    def _acquire_scan(self, destination: Path, device: ScannerDevice) -> None:
+        try:
+            with self.console.status(f"Scanne mit {self.settings.dpi} dpi ..."):
+                scan_to_file(
+                    destination,
+                    device=device.name,
+                    dpi=self.settings.dpi,
+                )
+        except ScannerError:
+            # Nach einem Verbindungsfehler wird beim nächsten Versuch neu
+            # gesucht, statt ein nicht mehr erreichbares Gerät festzuhalten.
+            self._remembered_device = None
+            raise
 
     def _split_file(self) -> None:
         raw_path = Prompt.ask("Pfad zur Scandatei").strip()

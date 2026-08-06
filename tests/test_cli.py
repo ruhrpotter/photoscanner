@@ -15,6 +15,12 @@ class CliTests(unittest.TestCase):
         args = build_parser().parse_args(["scan", "--date", "01.09.1995"])
         self.assertEqual(date(1995, 9, 1), args.date)
 
+    def test_scan_full_has_no_analysis_options(self) -> None:
+        args = build_parser().parse_args(["scan-full", "--date", "01.09.1995"])
+        self.assertEqual("scan-full", args.command)
+        self.assertEqual(date(1995, 9, 1), args.date)
+        self.assertFalse(hasattr(args, "threshold"))
+
     @patch("photoscanner.cli.list_devices", side_effect=ScannerError("SANE fehlt"))
     def test_scanner_error_returns_clean_exit_code(self, _devices) -> None:
         errors = StringIO()

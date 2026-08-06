@@ -9,7 +9,13 @@ import cv2
 import numpy as np
 from PIL import ExifTags, Image, ImageDraw
 
-from photoscanner.splitter import SplitConfig, SplitError, detect_photos, split_scan
+from photoscanner.splitter import (
+    SplitConfig,
+    SplitError,
+    detect_photos,
+    save_full_scan,
+    split_scan,
+)
 
 
 def make_photo(size: tuple[int, int], color: tuple[int, int, int]) -> Image.Image:
@@ -139,6 +145,26 @@ class SplitterTests(unittest.TestCase):
                     )
                 modified = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
                 self.assertEqual(selected_date, modified.date())
+
+    def test_saves_full_scan_without_splitting_or_resizing(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "scan.png"
+            synthetic_scan().save(source, dpi=(600, 600))
+
+            output = save_full_scan(
+                source,
+                root / "out",
+                SplitConfig(output_format="png", capture_date=date(1995, 9, 1)),
+            )
+
+            self.assertEqual("scan_19950901", output.stem[:13])
+            self.assertEqual(1, len(list((root / "out").iterdir())))
+            with Image.open(output) as image:
+                self.assertEqual((1500, 1100), image.size)
+                self.assertTrue(
+                    image.getexif()[ExifTags.Base.DateTimeOriginal].startswith("1995:09:01 ")
+                )
 
     def test_scanner_edge_does_not_join_adjacent_photos(self) -> None:
         rgb = np.asarray(edge_touching_scan())

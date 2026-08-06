@@ -311,6 +311,41 @@ def _capture_datetime(capture_date: date | None) -> datetime:
     )
 
 
+def save_full_scan(
+    source: Path,
+    output_directory: Path,
+    config: SplitConfig | None = None,
+    *,
+    prefix: str | None = None,
+) -> Path:
+    """Speichert die vollständige Scanfläche als genau eine Datei ohne Analyse."""
+    config = config or SplitConfig()
+    config.validate()
+    source = source.expanduser().resolve()
+    if not source.is_file():
+        raise SplitError(f"Die Eingabedatei existiert nicht: {source}")
+
+    image, embedded_dpi = _read_image(source)
+    output_directory = output_directory.expanduser().resolve()
+    output_directory.mkdir(parents=True, exist_ok=True)
+    normalized_format = config.output_format.lower().replace("jpeg", "jpg").replace("tiff", "tif")
+    suffix = f".{normalized_format}"
+    captured_at = _capture_datetime(config.capture_date)
+    base = prefix or f"scan_{captured_at:%Y%m%d_%H%M%S}"
+    path = _unique_path(output_directory, base, suffix)
+    effective_dpi = (
+        (float(config.dpi), float(config.dpi)) if config.dpi is not None else embedded_dpi
+    )
+    _save_photo(
+        image,
+        path,
+        quality=config.jpeg_quality,
+        dpi=effective_dpi,
+        captured_at=captured_at,
+    )
+    return path
+
+
 def _save_preview(
     image: np.ndarray,
     photos: Iterable[DetectedPhoto],
