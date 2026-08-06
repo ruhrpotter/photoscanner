@@ -1,0 +1,19 @@
+/* Als ~/.config/photoscanner/theme.css speichern. Änderungen werden live geladen. */
+:root {
+  --accent-bg-color: #8aadf4;
+  --accent-fg-color: #18222f;
+  --accent-color: #b7cdf8;
+  --window-bg-color: #161b22;
+  --window-fg-color: #e6edf3;
+  --view-bg-color: #0f141a;
+  --view-fg-color: #e6edf3;
+  --card-bg-color: #202731;
+  --card-fg-color: #e6edf3;
+  --headerbar-bg-color: #161b22;
+  --headerbar-fg-color: #e6edf3;
+}
+
+:root {
+  --photoscanner-radius: 22px;
+}
+

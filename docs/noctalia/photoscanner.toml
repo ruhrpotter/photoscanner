@@ -1,0 +1,4 @@
+[theme.templates.user.photoscanner]
+input_path  = "$XDG_CONFIG_HOME/noctalia/templates/photoscanner.css"
+output_path = "$XDG_CONFIG_HOME/photoscanner/theme.css"
+

@@ -1,0 +1,58 @@
+:root {
+  --photoscanner-radius: 18px;
+}
+
+.app-shell {
+  background: var(--window-bg-color);
+}
+
+.scanner-sidebar {
+  background: color-mix(in srgb, var(--window-bg-color) 90%, var(--accent-bg-color));
+  border-right: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.scanner-sidebar .title-1 {
+  font-weight: 760;
+}
+
+.preview-shell {
+  background: color-mix(in srgb, var(--view-bg-color) 94%, black);
+}
+
+.preview-card {
+  background: var(--card-bg-color);
+  border-radius: var(--photoscanner-radius);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 14%);
+}
+
+.empty-preview-icon {
+  color: var(--accent-color);
+  opacity: 0.8;
+}
+
+.status-card {
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card-bg-color) 88%, var(--accent-bg-color));
+}
+
+.primary-action {
+  min-height: 46px;
+  border-radius: 14px;
+  font-weight: 700;
+}
+
+.compact-control {
+  min-width: 112px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .preview-shell {
+    background: color-mix(in srgb, var(--window-bg-color) 82%, black);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none;
+  }
+}

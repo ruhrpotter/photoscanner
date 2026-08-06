@@ -6,5 +6,6 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+target/
 output/
 samples/

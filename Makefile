@@ -1,15 +1,29 @@
-.PHONY: install run test check
+.PHONY: build run test check release install-user uninstall-user
 
-install:
-	python3 -m venv .venv
-	.venv/bin/python -m pip install -e .
+build:
+	cargo build
 
 run:
-	.venv/bin/photoscanner
+	cargo run --release
 
 test:
-	.venv/bin/python -m unittest discover -s tests -v
+	cargo test --all-targets
 
-check: test
-	.venv/bin/python -m compileall -q src tests
-	.venv/bin/photoscanner --help >/dev/null
+check:
+	cargo fmt -- --check
+	cargo clippy --all-targets -- -D warnings
+	cargo test --all-targets
+	cargo run -- --help >/dev/null
+
+release:
+	cargo build --release
+
+install-user: release
+	install -Dm755 target/release/photoscanner "$(HOME)/.local/bin/photoscanner"
+	install -Dm644 data/de.martin.PhotoScanner.desktop "$(HOME)/.local/share/applications/de.martin.PhotoScanner.desktop"
+	update-desktop-database "$(HOME)/.local/share/applications" 2>/dev/null || true
+
+uninstall-user:
+	rm -f "$(HOME)/.local/bin/photoscanner"
+	rm -f "$(HOME)/.local/share/applications/de.martin.PhotoScanner.desktop"
+	update-desktop-database "$(HOME)/.local/share/applications" 2>/dev/null || true

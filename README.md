@@ -1,124 +1,139 @@
 # Photo Scanner
 
-Photo Scanner ist eine lokale Terminal-Anwendung für Flachbettscanner. Sie scannt
-mehrere gleichzeitig aufgelegte Papierfotos, erkennt deren Grenzen, begradigt
-leichte Drehungen und speichert jedes Foto als eigene Bilddatei. Zu jedem Lauf
-entsteht zusätzlich eine markierte Vorschau zur schnellen Kontrolle.
+Photo Scanner ist eine native Linux-Anwendung zum Digitalisieren von
+Papierfotos. Sie scannt über SANE, erkennt mehrere gleichzeitig aufgelegte
+Fotos, begradigt sie und speichert jedes Foto mit PhotoPrism-kompatiblen
+Aufnahmedaten. Alternativ lässt sich die gesamte Scanfläche unverändert als eine
+Datei speichern.
 
-## Voraussetzungen
+Die Anwendung ist vollständig in Rust geschrieben. Die Oberfläche verwendet
+GTK4 und Libadwaita, läuft nativ unter Wayland und passt deshalb gut zu CachyOS,
+niri und Noctalia. Alle längeren Scanner- und OpenCV-Arbeiten laufen außerhalb
+des GUI-Threads.
 
-- Python 3.11 oder neuer
-- ein von SANE unterstützter Scanner
-- CachyOS/Arch: `sudo pacman -S sane sane-airscan`
+## Funktionen
 
-`sane-airscan` wird für viele moderne Netzwerk- und USB-Geräte mit eSCL/AirScan
-benötigt. Ob der Scanner sichtbar ist, zeigt anschließend `scanimage -L`.
+- moderne, responsive GTK4-Oberfläche
+- SANE-/AirScan-Scanner auswählen und ohne erneute Gerätesuche weiterverwenden
+- 300, 600 oder 1200 dpi
+- automatische Fotoerkennung, Perspektivkorrektur und Begradigung
+- vollständige Scanfläche ohne Erkennung speichern
+- vorhandene PNG-, JPEG- oder TIFF-Scans importieren
+- JPG, PNG und verlustfrei komprimiertes TIFF exportieren
+- EXIF-Aufnahmedatum, Zeitzonenoffset, Softwarekennung und DPI schreiben
+- vorhandene Dateien niemals überschreiben
+- markierte Kontrollvorschau erzeugen
+- System-Dark-Mode und System-Akzentfarbe übernehmen
+- eigenes CSS-Theme unter `~/.config/photoscanner/theme.css` live nachladen
+- Noctalia-v5-Paletten über ein mitgeliefertes App-Theming-Template übernehmen
+- CLI für Automatisierung und Stapelverarbeitung erhalten
 
-## Installation
+## Voraussetzungen auf CachyOS/Arch
 
 ```bash
-make install
+sudo pacman -S --needed rust clang gtk4 libadwaita opencv sane sane-airscan
 ```
 
-Dadurch wird die lokale Umgebung `.venv` angelegt und die Anwendung inklusive
-ihrer Bildverarbeitungsabhängigkeiten installiert.
+Ob SANE den Scanner erkennt:
 
-## Interaktive Verwendung
+```bash
+scanimage -L
+```
+
+Das Projekt ist auf den aktuellen CachyOS-Stack mit OpenCV 5 ausgerichtet und
+verwendet deshalb dessen pkg-config-Namen `opencv5`.
+
+## Starten
+
+Direkt aus dem Projekt:
 
 ```bash
 make run
 ```
 
-Im Menü kann direkt gescannt, eine vorhandene Scandatei importiert oder der
-Scanner geprüft werden. Standardmäßig werden die Bilder unter `output/`
-gespeichert. Vor jedem Scan fragt die TUI nach dem Aufnahmedatum. Enter übernimmt
-das heutige Datum; historische Fotos können zum Beispiel mit `01.09.1995`
-versehen werden.
+Oder zunächst als Release-Build installieren:
 
-Menüpunkt `2` speichert die gesamte Scanfläche als eine einzelne Datei. In
-diesem Modus findet keine Fotoerkennung, Trennung, Begradigung oder
-Vorschauanalyse statt.
+```bash
+make install-user
+```
 
-Der einmal ausgewählte Scanner bleibt für die laufende TUI-Sitzung gespeichert.
-Weitere Scans starten deshalb ohne erneute, langsame SANE-Gerätesuche. Menüpunkt
-`4` aktualisiert die Geräteliste weiterhin bewusst.
+Danach steht **Photo Scanner** im App-Launcher zur Verfügung. Im Terminal lässt
+sich die GUI mit `photoscanner gui` starten.
 
-Für gute Ergebnisse:
+## Bedienung
 
-- Scannerauflösung 600 dpi für normale Papierfotos
-- Fotos nicht überlappen lassen
-- rund 1 cm Abstand zwischen den Fotos und zum Rand lassen
-- Scanfläche und Fotos möglichst staubfrei halten
-- Scannerdeckel schließen
+1. Scanner auswählen und Fotos mit ungefähr 1 cm Abstand auflegen.
+2. Aufnahmedatum, Auflösung und Ausgabeformat einstellen.
+3. `Fotos automatisch trennen` oder `Gesamte Scanfläche speichern` auswählen.
+4. Scan starten und die markierte Vorschau kontrollieren.
+
+Die Oberfläche bleibt während Scan und Bildverarbeitung bedienbar. Bei einem
+schmalen niri-Tile wird die Einstellungsseite automatisch als einblendbare
+Seitenleiste dargestellt.
+
+## Themes und Noctalia
+
+GTK4/Libadwaita übernimmt standardmäßig Hell-/Dunkelmodus, Kontrastpräferenz
+und Akzentfarbe des Systems. Zusätzlich lädt Photo Scanner diese Datei:
+
+```text
+~/.config/photoscanner/theme.css
+```
+
+Änderungen werden innerhalb ungefähr einer Sekunde übernommen. Ein manuelles
+Beispiel liegt in `docs/theme.css.example`.
+
+Für Noctalia v5:
+
+```bash
+mkdir -p ~/.config/noctalia/templates
+cp docs/noctalia/photoscanner.css ~/.config/noctalia/templates/photoscanner.css
+cp docs/noctalia/photoscanner.toml ~/.config/noctalia/photoscanner.toml
+noctalia theme --list-templates
+```
+
+Anschließend in Noctalia unter **Media & UI → Theme** das Theme erneut anwenden.
+Noctalia rendert dann die aktive Material-Palette nach
+`~/.config/photoscanner/theme.css`. Ein Neustart der Anwendung ist nicht nötig.
 
 ## Kommandozeile
 
 Scanner anzeigen:
 
 ```bash
-.venv/bin/photoscanner devices
+photoscanner devices
 ```
 
-Scannen und direkt trennen:
+Scannen und automatisch trennen:
 
 ```bash
-.venv/bin/photoscanner scan --dpi 600 --output ~/Bilder/Archiv
+photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
 ```
 
-Mit einem manuell gewählten Aufnahmedatum:
+Gesamte Scanfläche speichern:
 
 ```bash
-.venv/bin/photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
+photoscanner scan-full --dpi 600 --format tif --output ~/Bilder/Archiv
 ```
 
-Gesamte Scanfläche ohne Analyse speichern:
+Vorhandene Datei trennen:
 
 ```bash
-.venv/bin/photoscanner scan-full --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
+photoscanner split scan.png --output ~/Bilder/Archiv --threshold 10
 ```
 
-Eine vorhandene Datei trennen:
+Alle Befehle und Optionen:
 
 ```bash
-.venv/bin/photoscanner split scan.png --output ~/Bilder/Archiv --prefix urlaub_1998
+photoscanner --help
 ```
 
-Wenn die automatische Erkennung zu viel oder zu wenig markiert, kann der
-Schwellwert manuell gesetzt werden. Ein kleinerer Wert erkennt schwächere
-Unterschiede zum Scanbett, ein größerer Wert ignoriert mehr Hintergrund:
-
-```bash
-.venv/bin/photoscanner split scan.png --threshold 10
-```
-
-Alle Optionen zeigt `.venv/bin/photoscanner split --help`.
-
-## Ausgabe
-
-Die Standardnamen sehen so aus:
-
-```text
-scan_20260806_143012_01.jpg
-scan_20260806_143012_02.jpg
-scan_20260806_143012_vorschau.jpg
-```
-
-Vorhandene Dateien werden nie überschrieben. JPG (Qualität 95), PNG und
-verlustfrei komprimiertes TIFF werden unterstützt. Beim direkten Scannen wird
-die eingestellte dpi-Zahl in die Einzelfotos übernommen.
-
-Alle erzeugten Fotos und die Vorschau erhalten das ausgewählte lokale Datum als
-EXIF `DateTimeOriginal`, `DateTimeDigitized` und `DateTime`. Der Dateiname und
-der Datei-Zeitstempel verwenden denselben Zeitpunkt. Ohne manuelle Eingabe gilt
-das heutige Datum. Dadurch erkennt PhotoPrism die Bilder zuverlässig mit dem
-Scan-Tag oder dem ausgewählten historischen Aufnahmedatum.
-
-## Tests
+## Qualitätssicherung
 
 ```bash
 make check
 ```
 
-Die Tests erzeugen einen synthetischen Scan mit drei gedrehten Fotos und prüfen
-Erkennung, Begradigung, DPI-Metadaten, Dateiexport und Scannerfehler ohne echte
-Hardware.
+Die Rust-Tests erzeugen synthetische Scans und prüfen unter anderem Erkennung,
+Begradigung, eng nebeneinanderliegende Fotos, Scanner-Ränder, kollisionsfreie
+Dateinamen sowie EXIF- und DPI-Metadaten für JPG, PNG und TIFF.
