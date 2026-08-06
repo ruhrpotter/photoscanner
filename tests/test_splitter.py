@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -106,6 +106,30 @@ class SplitterTests(unittest.TestCase):
                         self.assertEqual("Photo Scanner", exif[ExifTags.Base.Software])
                     modified = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
                     self.assertEqual(datetime.now().astimezone().date(), modified.date())
+
+    def test_exports_manually_selected_capture_date(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "scan.png"
+            synthetic_scan().save(source)
+            selected_date = date(1995, 9, 1)
+
+            result = split_scan(
+                source,
+                root / "out",
+                SplitConfig(capture_date=selected_date),
+                save_preview=False,
+            )
+
+            self.assertTrue(result.files[0].name.startswith("scan_19950901_"))
+            for path in result.files:
+                with Image.open(path) as image:
+                    exif = image.getexif()
+                    self.assertTrue(
+                        exif[ExifTags.Base.DateTimeOriginal].startswith("1995:09:01 ")
+                    )
+                modified = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+                self.assertEqual(selected_date, modified.date())
 
     def test_scanner_edge_does_not_join_adjacent_photos(self) -> None:
         rgb = np.asarray(edge_touching_scan())

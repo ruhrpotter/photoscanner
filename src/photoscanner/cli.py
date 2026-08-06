@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,6 +13,15 @@ from . import __version__
 from .scanner import ScannerError, list_devices, scan_to_file
 from .splitter import SplitConfig, SplitError, split_scan
 from .tui import PhotoScannerTui
+
+
+def _date_argument(value: str) -> date:
+    try:
+        return datetime.strptime(value, "%d.%m.%Y").date()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Datum muss im Format TT.MM.JJJJ angegeben werden, z. B. 01.09.1995"
+        ) from exc
 
 
 def _add_split_options(parser: argparse.ArgumentParser) -> None:
@@ -40,6 +50,12 @@ def _add_split_options(parser: argparse.ArgumentParser) -> None:
         help="Zusätzlicher Rand je Seite (Standard: 1.2)",
     )
     parser.add_argument("--prefix", help="Dateinamen-Präfix")
+    parser.add_argument(
+        "--date",
+        type=_date_argument,
+        metavar="TT.MM.JJJJ",
+        help="Aufnahmedatum für EXIF, Dateiname und Datei-Zeitstempel (Standard: heute)",
+    )
     parser.add_argument("--no-preview", action="store_true", help="Kein markiertes Vorschaubild")
 
 
@@ -72,6 +88,7 @@ def _config_from_args(args: argparse.Namespace, *, scanned: bool = False) -> Spl
         output_format=args.format,
         jpeg_quality=args.quality,
         dpi=args.dpi if scanned else None,
+        capture_date=args.date,
     )
 
 

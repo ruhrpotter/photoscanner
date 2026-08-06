@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, tzinfo
 import os
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import cv2
 import numpy as np
@@ -26,6 +27,7 @@ class SplitConfig:
     output_format: str = "jpg"
     jpeg_quality: int = 95
     dpi: int | None = None
+    capture_date: date | None = None
 
     def validate(self) -> None:
         if not 0.1 <= self.min_area_percent <= 50:
@@ -286,6 +288,27 @@ def _set_file_time(path: Path, captured_at: datetime) -> None:
     os.utime(path, (timestamp, timestamp))
 
 
+def _system_timezone() -> tzinfo:
+    """Liefert nach Möglichkeit die echte lokale Zone inklusive historischer DST-Regeln."""
+    try:
+        zone_path = Path("/etc/localtime").resolve()
+        zone_name = zone_path.relative_to("/usr/share/zoneinfo").as_posix()
+        return ZoneInfo(zone_name)
+    except (OSError, ValueError, ZoneInfoNotFoundError):
+        return datetime.now().astimezone().tzinfo or ZoneInfo("UTC")
+
+
+def _capture_datetime(capture_date: date | None) -> datetime:
+    current = datetime.now(_system_timezone())
+    if capture_date is None:
+        return current
+    return current.replace(
+        year=capture_date.year,
+        month=capture_date.month,
+        day=capture_date.day,
+    )
+
+
 def _save_preview(
     image: np.ndarray,
     photos: Iterable[DetectedPhoto],
@@ -346,7 +369,7 @@ def split_scan(
     output_directory.mkdir(parents=True, exist_ok=True)
     normalized_format = config.output_format.lower().replace("jpeg", "jpg").replace("tiff", "tif")
     suffix = f".{normalized_format}"
-    captured_at = datetime.now().astimezone()
+    captured_at = _capture_datetime(config.capture_date)
     base = prefix or f"scan_{captured_at:%Y%m%d_%H%M%S}"
     effective_dpi = (
         (float(config.dpi), float(config.dpi)) if config.dpi is not None else embedded_dpi

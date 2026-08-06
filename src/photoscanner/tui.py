@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,7 +26,12 @@ class TuiSettings:
     threshold: float | None = None
     padding_percent: float = 1.2
 
-    def split_config(self, *, scanned: bool = False) -> SplitConfig:
+    def split_config(
+        self,
+        *,
+        scanned: bool = False,
+        capture_date: date | None = None,
+    ) -> SplitConfig:
         return SplitConfig(
             min_area_percent=self.min_area_percent,
             threshold=self.threshold,
@@ -33,6 +39,7 @@ class TuiSettings:
             output_format=self.output_format,
             jpeg_quality=self.jpeg_quality,
             dpi=self.dpi if scanned else None,
+            capture_date=capture_date,
         )
 
 
@@ -100,6 +107,7 @@ class PhotoScannerTui:
         self.console.print(
             "\nLege die Fotos mit [bold]mindestens 1 cm Abstand[/bold] auf das Scanbett."
         )
+        capture_date = self._ask_capture_date()
         if not Confirm.ask("Scan starten?", default=True):
             return
         with TemporaryDirectory(prefix="photoscanner-") as temporary:
@@ -114,7 +122,7 @@ class PhotoScannerTui:
                 result = split_scan(
                     scan_path,
                     self.settings.output_directory,
-                    self.settings.split_config(scanned=True),
+                    self.settings.split_config(scanned=True, capture_date=capture_date),
                 )
         self._show_result(result)
 
@@ -122,13 +130,28 @@ class PhotoScannerTui:
         raw_path = Prompt.ask("Pfad zur Scandatei").strip()
         if not raw_path:
             raise SplitError("Es wurde keine Datei angegeben.")
+        capture_date = self._ask_capture_date()
         with self.console.status("Erkenne und begradige Fotos ..."):
             result = split_scan(
                 Path(raw_path),
                 self.settings.output_directory,
-                self.settings.split_config(),
+                self.settings.split_config(capture_date=capture_date),
             )
         self._show_result(result)
+
+    def _ask_capture_date(self) -> date:
+        today = datetime.now().astimezone().date()
+        value = Prompt.ask(
+            "Aufnahmedatum (TT.MM.JJJJ)",
+            default=today.strftime("%d.%m.%Y"),
+        )
+        try:
+            return datetime.strptime(value.strip(), "%d.%m.%Y").date()
+        except ValueError as exc:
+            raise SplitError(
+                "Ungültiges Aufnahmedatum. Verwende das Format TT.MM.JJJJ, "
+                "zum Beispiel 01.09.1995."
+            ) from exc
 
     def _show_result(self, result: SplitResult) -> None:
         self.console.print(

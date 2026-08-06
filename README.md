@@ -31,7 +31,9 @@ make run
 
 Im Menü kann direkt gescannt, eine vorhandene Scandatei importiert oder der
 Scanner geprüft werden. Standardmäßig werden die Bilder unter `output/`
-gespeichert.
+gespeichert. Vor jedem Scan fragt die TUI nach dem Aufnahmedatum. Enter übernimmt
+das heutige Datum; historische Fotos können zum Beispiel mit `01.09.1995`
+versehen werden.
 
 Für gute Ergebnisse:
 
@@ -53,6 +55,12 @@ Scannen und direkt trennen:
 
 ```bash
 .venv/bin/photoscanner scan --dpi 600 --output ~/Bilder/Archiv
+```
+
+Mit einem manuell gewählten Aufnahmedatum:
+
+```bash
+.venv/bin/photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
 ```
 
 Eine vorhandene Datei trennen:
@@ -85,11 +93,11 @@ Vorhandene Dateien werden nie überschrieben. JPG (Qualität 95), PNG und
 verlustfrei komprimiertes TIFF werden unterstützt. Beim direkten Scannen wird
 die eingestellte dpi-Zahl in die Einzelfotos übernommen.
 
-Alle erzeugten Fotos und die Vorschau erhalten standardmäßig den aktuellen
-lokalen Zeitpunkt als EXIF `DateTimeOriginal`, `DateTimeDigitized` und
-`DateTime`. Der Dateiname und der Datei-Zeitstempel verwenden denselben
-Zeitpunkt. Dadurch erkennt PhotoPrism die Bilder zuverlässig mit dem Datum des
-Scan-Tages.
+Alle erzeugten Fotos und die Vorschau erhalten das ausgewählte lokale Datum als
+EXIF `DateTimeOriginal`, `DateTimeDigitized` und `DateTime`. Der Dateiname und
+der Datei-Zeitstempel verwenden denselben Zeitpunkt. Ohne manuelle Eingabe gilt
+das heutige Datum. Dadurch erkennt PhotoPrism die Bilder zuverlässig mit dem
+Scan-Tag oder dem ausgewählten historischen Aufnahmedatum.
 
 ## Tests
 
