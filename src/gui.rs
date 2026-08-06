@@ -24,10 +24,10 @@ struct Ui {
     toast_overlay: adw::ToastOverlay,
     split_view: adw::OverlaySplitView,
     device_model: gtk::StringList,
-    device_dropdown: gtk::DropDown,
-    mode_dropdown: gtk::DropDown,
-    dpi_dropdown: gtk::DropDown,
-    format_dropdown: gtk::DropDown,
+    device_dropdown: adw::ComboRow,
+    mode_dropdown: adw::ComboRow,
+    dpi_dropdown: adw::ComboRow,
+    format_dropdown: adw::ComboRow,
     date_entry: adw::EntryRow,
     auto_threshold: gtk::Switch,
     threshold: gtk::SpinButton,
@@ -147,24 +147,32 @@ fn build_window(application: &adw::Application) {
     split_view.add_css_class("app-shell");
 
     let device_model = gtk::StringList::new(&["Scanner werden gesucht …"]);
-    let device_dropdown = gtk::DropDown::builder()
+    let device_dropdown = adw::ComboRow::builder()
+        .title("Scanner")
         .model(&device_model)
-        .hexpand(true)
         .build();
-    device_dropdown.add_css_class("compact-control");
 
-    let mode_dropdown =
-        gtk::DropDown::from_strings(&["Fotos automatisch trennen", "Gesamte Scanfläche speichern"]);
-    mode_dropdown.set_selected(0);
-    mode_dropdown.add_css_class("compact-control");
+    let mode_model =
+        gtk::StringList::new(&["Fotos automatisch trennen", "Gesamte Scanfläche speichern"]);
+    let mode_dropdown = adw::ComboRow::builder()
+        .title("Verarbeitung")
+        .model(&mode_model)
+        .selected(0)
+        .build();
 
-    let dpi_dropdown = gtk::DropDown::from_strings(&["300 dpi", "600 dpi", "1200 dpi"]);
-    dpi_dropdown.set_selected(1);
-    dpi_dropdown.add_css_class("compact-control");
+    let dpi_model = gtk::StringList::new(&["300 dpi", "600 dpi", "1200 dpi"]);
+    let dpi_dropdown = adw::ComboRow::builder()
+        .title("Auflösung")
+        .model(&dpi_model)
+        .selected(1)
+        .build();
 
-    let format_dropdown = gtk::DropDown::from_strings(&["JPG", "PNG", "TIFF"]);
-    format_dropdown.set_selected(0);
-    format_dropdown.add_css_class("compact-control");
+    let format_model = gtk::StringList::new(&["JPG", "PNG", "TIFF"]);
+    let format_dropdown = adw::ComboRow::builder()
+        .title("Bildformat")
+        .model(&format_model)
+        .selected(0)
+        .build();
 
     let date_entry = adw::EntryRow::builder()
         .title("Aufnahmedatum")
@@ -301,15 +309,15 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     )));
     toolbar.add_top_bar(&header);
 
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
-    content.set_margin_top(18);
-    content.set_margin_bottom(18);
-    content.set_margin_start(18);
-    content.set_margin_end(18);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
     content.add_css_class("scanner-sidebar");
 
     let scanner_group = adw::PreferencesGroup::builder().title("Scan").build();
-    scanner_group.add(&row_with_suffix("Scanner", None, &ui.device_dropdown));
+    scanner_group.add(&ui.device_dropdown);
     let refresh_row = adw::ActionRow::builder()
         .title("Geräte aktualisieren")
         .subtitle("SANE und AirScan erneut abfragen")
@@ -317,8 +325,8 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     refresh_row.add_suffix(&ui.refresh_button);
     refresh_row.set_activatable_widget(Some(&ui.refresh_button));
     scanner_group.add(&refresh_row);
-    scanner_group.add(&row_with_suffix("Verarbeitung", None, &ui.mode_dropdown));
-    scanner_group.add(&row_with_suffix("Auflösung", None, &ui.dpi_dropdown));
+    scanner_group.add(&ui.mode_dropdown);
+    scanner_group.add(&ui.dpi_dropdown);
     scanner_group.add(&ui.date_entry);
     content.append(&scanner_group);
 
@@ -330,7 +338,7 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     output_row.add_suffix(&ui.output_button);
     output_row.set_activatable_widget(Some(&ui.output_button));
     export_group.add(&output_row);
-    export_group.add(&row_with_suffix("Bildformat", None, &ui.format_dropdown));
+    export_group.add(&ui.format_dropdown);
     export_group.add(&row_with_suffix(
         "JPEG-Qualität",
         Some("Nur für exportierte JPG-Fotos"),
@@ -366,7 +374,7 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     ));
     content.append(&detection_group);
 
-    let actions = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    let actions = gtk::Box::new(gtk::Orientation::Vertical, 8);
     actions.append(&ui.scan_button);
     actions.append(&ui.import_button);
     content.append(&actions);
@@ -477,6 +485,10 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
 }
 
 fn connect_actions(ui: &Ui) {
+    let device_ui = ui.clone();
+    ui.device_dropdown
+        .connect_selected_notify(move |_| update_device_tooltip(&device_ui));
+
     let threshold = ui.threshold.clone();
     ui.auto_threshold
         .connect_active_notify(move |switch| threshold.set_sensitive(!switch.is_active()));
@@ -496,6 +508,12 @@ fn connect_actions(ui: &Ui) {
     let import_ui = ui.clone();
     ui.import_button
         .connect_clicked(move |_| choose_import_file(&import_ui));
+}
+
+fn update_device_tooltip(ui: &Ui) {
+    let selected = ui.device_dropdown.selected() as usize;
+    let tooltip = ui.devices.borrow().get(selected).map(ScannerDevice::label);
+    ui.device_dropdown.set_tooltip_text(tooltip.as_deref());
 }
 
 fn choose_output_directory(ui: &Ui) {
@@ -696,10 +714,11 @@ fn handle_message(ui: &Ui, message: Message) {
                 ui.device_model.remove(0);
             }
             for device in &devices {
-                ui.device_model.append(&device.label());
+                ui.device_model.append(&device.display_name());
             }
             *ui.devices.borrow_mut() = devices;
             ui.device_dropdown.set_selected(0);
+            update_device_tooltip(ui);
             ui.refresh_button.set_sensitive(true);
             ui.spinner.stop();
             if ui.devices.borrow().is_empty() {

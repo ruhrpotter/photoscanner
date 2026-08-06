@@ -38,6 +38,20 @@ pub struct ScannerDevice {
 }
 
 impl ScannerDevice {
+    pub fn display_name(&self) -> String {
+        let vendor = self.vendor.trim();
+        let model = self.model.trim();
+        let vendor_is_protocol = ["escl", "wsd", "airscan"]
+            .iter()
+            .any(|protocol| vendor.eq_ignore_ascii_case(protocol));
+
+        match (vendor_is_protocol || vendor.is_empty(), model.is_empty()) {
+            (_, true) => self.name.clone(),
+            (true, false) => model.to_string(),
+            (false, false) => format!("{vendor} {model}"),
+        }
+    }
+
     pub fn label(&self) -> String {
         let description = format!("{} {}", self.vendor, self.model).trim().to_string();
         if description.is_empty() {
@@ -205,5 +219,22 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].name, "airscan:e0:Scanner");
         assert_eq!(devices[0].label(), "Epson ET-4850 (airscan:e0:Scanner)");
+        assert_eq!(devices[0].display_name(), "Epson ET-4850");
+    }
+
+    #[test]
+    fn omits_protocol_vendor_from_display_name() {
+        let device = ScannerDevice {
+            name: "airscan:e0:Brother MFC-L2960DW".to_string(),
+            vendor: "eSCL".to_string(),
+            model: "Brother MFC-L2960DW".to_string(),
+            kind: "ip=192.0.2.1".to_string(),
+        };
+
+        assert_eq!(device.display_name(), "Brother MFC-L2960DW");
+        assert_eq!(
+            device.label(),
+            "eSCL Brother MFC-L2960DW (airscan:e0:Brother MFC-L2960DW)"
+        );
     }
 }
