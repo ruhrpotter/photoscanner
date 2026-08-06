@@ -1,24 +1,33 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::{self, Sender};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use adw::prelude::*;
 use anyhow::{Context, Result, anyhow, bail};
+use async_channel::Sender;
 use chrono::{Local, NaiveDate};
 use gtk::gio;
 use gtk::glib;
-use photoscanner::scanner::{ScannerDevice, list_devices, scan_to_file};
+use opencv::core::{Size, Vector};
+use opencv::imgcodecs;
+use opencv::imgproc;
+use opencv::prelude::*;
+use photoscanner::scanner::{
+    ScannerCancellation, ScannerDevice, list_devices_cancellable, scan_to_file_cancellable,
+};
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use photoscanner::{APP_ID, APP_NAME};
 use tempfile::TempDir;
 
 const DEFAULT_STYLE: &str = include_str!("style.css");
+const PREVIEW_MAX_EDGE: i32 = 1600;
+const CANCELLED_MESSAGE: &str = "Vorgang abgebrochen.";
+const WORKER_PANIC_MESSAGE: &str = "Interner Fehler im Hintergrundprozess.";
 
-#[derive(Clone)]
 struct Ui {
     window: adw::ApplicationWindow,
     toast_overlay: adw::ToastOverlay,
@@ -46,23 +55,47 @@ struct Ui {
     output_directory: Rc<RefCell<PathBuf>>,
     busy: Rc<Cell<bool>>,
     sender: Sender<Message>,
+    operation_id: Rc<Cell<u64>>,
+    cancellation: Rc<RefCell<Option<ScannerCancellation>>>,
+    application_hold: Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    closing: Rc<Cell<bool>>,
+    preview_directory: Rc<RefCell<Option<TempDir>>>,
+    theme_monitor: Rc<RefCell<Option<gio::FileMonitor>>>,
+    scan_action: gio::SimpleAction,
+    import_action: gio::SimpleAction,
+    refresh_action: gio::SimpleAction,
+    output_action: gio::SimpleAction,
+    cancel_action: gio::SimpleAction,
 }
 
 enum Message {
-    Devices(Result<Vec<ScannerDevice>, String>),
-    Work(Result<WorkResult, String>),
+    Devices {
+        operation_id: u64,
+        result: Result<Vec<ScannerDevice>, String>,
+    },
+    Work {
+        operation_id: u64,
+        result: Result<WorkResult, String>,
+    },
 }
 
 struct WorkResult {
     title: String,
     detail: String,
     preview: PathBuf,
+    preview_directory: TempDir,
 }
 
 pub fn run() {
     let application = adw::Application::builder().application_id(APP_ID).build();
     application.connect_startup(|_| install_theme());
-    application.connect_activate(build_window);
+    application.connect_activate(|application| {
+        if let Some(window) = application.windows().first() {
+            window.present();
+        } else {
+            build_window(application);
+        }
+    });
     // Clap has already consumed our command line. Passing the original `gui`
     // argument to GApplication would make it look like a file-open request.
     application.run_with_args(&["photoscanner"]);
@@ -85,48 +118,107 @@ fn install_theme() {
         &bundled,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
 
+fn install_custom_theme(ui: &Rc<Ui>) {
     let directory = config_directory();
+    if let Err(error) = fs::create_dir_all(&directory) {
+        show_error(
+            ui,
+            &format!(
+                "Theme-Ordner konnte nicht angelegt werden ({}): {error}",
+                directory.display()
+            ),
+        );
+        return;
+    }
+
+    let Some(display) = gtk::gdk::Display::default() else {
+        show_error(
+            ui,
+            "Das benutzerdefinierte Theme konnte nicht installiert werden.",
+        );
+        return;
+    };
     let path = directory.join("theme.css");
-    let _ = fs::create_dir_all(&directory);
-    let custom = gtk::CssProvider::new();
-    load_custom_theme(&custom, &path);
+    let provider = gtk::CssProvider::new();
+    let weak_ui = Rc::downgrade(ui);
+    provider.connect_parsing_error(move |_, _, error| {
+        if let Some(ui) = weak_ui.upgrade() {
+            show_error(&ui, &format!("Fehler in theme.css: {error}"));
+        }
+    });
+    if let Err(error) = load_custom_theme(&provider, &path) {
+        show_error(ui, &error.to_string());
+    }
     gtk::style_context_add_provider_for_display(
         &display,
-        &custom,
+        &provider,
         gtk::STYLE_PROVIDER_PRIORITY_USER,
     );
 
-    let mut last_modified = modified(&path);
-    glib::timeout_add_seconds_local(1, move || {
-        let current = modified(&path);
-        if current != last_modified {
-            load_custom_theme(&custom, &path);
-            last_modified = current;
+    let directory_file = gio::File::for_path(&directory);
+    let monitor = match directory_file.monitor_directory(
+        gio::FileMonitorFlags::WATCH_MOVES,
+        None::<&gio::Cancellable>,
+    ) {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            show_error(
+                ui,
+                &format!("Theme-Änderungen können nicht überwacht werden: {error}"),
+            );
+            return;
         }
-        glib::ControlFlow::Continue
+    };
+
+    let weak_ui = Rc::downgrade(ui);
+    monitor.connect_changed(move |_, file, other_file, event| {
+        let affects_theme = file.path().as_deref() == Some(path.as_path())
+            || other_file.and_then(gio::File::path).as_deref() == Some(path.as_path());
+        let should_reload = matches!(
+            event,
+            gio::FileMonitorEvent::ChangesDoneHint
+                | gio::FileMonitorEvent::Created
+                | gio::FileMonitorEvent::Deleted
+                | gio::FileMonitorEvent::Moved
+                | gio::FileMonitorEvent::MovedIn
+                | gio::FileMonitorEvent::MovedOut
+                | gio::FileMonitorEvent::Renamed
+        );
+        if affects_theme
+            && should_reload
+            && let Err(error) = load_custom_theme(&provider, &path)
+            && let Some(ui) = weak_ui.upgrade()
+        {
+            show_error(&ui, &error.to_string());
+        }
     });
+    *ui.theme_monitor.borrow_mut() = Some(monitor);
 }
 
-fn modified(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-}
-
-fn load_custom_theme(provider: &gtk::CssProvider, path: &Path) {
+fn load_custom_theme(provider: &gtk::CssProvider, path: &Path) -> Result<()> {
     if path.is_file() {
-        provider.load_from_path(path);
+        let stylesheet = fs::read_to_string(path)
+            .with_context(|| format!("Theme konnte nicht gelesen werden: {}", path.display()))?;
+        provider.load_from_string(&stylesheet);
     } else {
         provider.load_from_string("");
     }
+    Ok(())
 }
 
 fn build_window(application: &adw::Application) {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = async_channel::bounded(8);
     let devices = Rc::new(RefCell::new(Vec::new()));
     let output_directory = Rc::new(RefCell::new(default_output_directory()));
     let busy = Rc::new(Cell::new(false));
+    let operation_id = Rc::new(Cell::new(0));
+    let cancellation = Rc::new(RefCell::new(None));
+    let application_hold = Rc::new(RefCell::new(None));
+    let closing = Rc::new(Cell::new(false));
+    let preview_directory = Rc::new(RefCell::new(None));
+    let theme_monitor = Rc::new(RefCell::new(None));
 
     let window = adw::ApplicationWindow::builder()
         .application(application)
@@ -177,8 +269,11 @@ fn build_window(application: &adw::Application) {
     let date_entry = adw::EntryRow::builder()
         .title("Aufnahmedatum")
         .text(Local::now().format("%d.%m.%Y").to_string())
-        .input_purpose(gtk::InputPurpose::Digits)
+        .input_purpose(gtk::InputPurpose::FreeForm)
         .build();
+    date_entry.update_property(&[gtk::accessible::Property::Description(
+        "Aufnahmedatum im Format Tag Punkt Monat Punkt Jahr",
+    )]);
 
     let auto_threshold = gtk::Switch::builder()
         .active(true)
@@ -208,6 +303,12 @@ fn build_window(application: &adw::Application) {
         .valign(gtk::Align::Center)
         .build();
     refresh_button.add_css_class("flat");
+    refresh_button.add_css_class("icon-action");
+    refresh_button.update_property(&[
+        gtk::accessible::Property::Label("Scanner neu suchen"),
+        gtk::accessible::Property::Description("SANE- und AirScan-Geräte erneut abfragen"),
+        gtk::accessible::Property::KeyShortcuts("Control+R"),
+    ]);
 
     let scan_button = gtk::Button::builder()
         .label("Scan starten")
@@ -223,6 +324,20 @@ fn build_window(application: &adw::Application) {
         .build();
     import_button.add_css_class("primary-action");
 
+    let scan_action = gio::SimpleAction::new("scan", None);
+    let import_action = gio::SimpleAction::new("import", None);
+    let refresh_action = gio::SimpleAction::new("refresh", None);
+    let output_action = gio::SimpleAction::new("choose-output", None);
+    let cancel_action = gio::SimpleAction::new("cancel", None);
+    cancel_action.set_enabled(false);
+    scan_button.set_action_name(Some("win.scan"));
+    import_button.set_action_name(Some("win.import"));
+    refresh_button.set_action_name(Some("win.refresh"));
+    output_button.set_action_name(Some("win.choose-output"));
+    scan_button.update_property(&[gtk::accessible::Property::KeyShortcuts("F9")]);
+    import_button.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+O")]);
+    output_button.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+L")]);
+
     let spinner = gtk::Spinner::new();
     let status_label = gtk::Label::builder()
         .label("Bereit zum Scannen")
@@ -230,9 +345,10 @@ fn build_window(application: &adw::Application) {
         .wrap(true)
         .hexpand(true)
         .build();
+    status_label.set_accessible_role(gtk::AccessibleRole::Status);
     let (preview_stack, picture) = build_preview();
 
-    let ui = Ui {
+    let ui = Rc::new(Ui {
         window: window.clone(),
         toast_overlay: adw::ToastOverlay::new(),
         split_view: split_view.clone(),
@@ -259,7 +375,18 @@ fn build_window(application: &adw::Application) {
         output_directory,
         busy,
         sender,
-    };
+        operation_id,
+        cancellation,
+        application_hold,
+        closing,
+        preview_directory,
+        theme_monitor,
+        scan_action,
+        import_action,
+        refresh_action,
+        output_action,
+        cancel_action,
+    });
 
     split_view.set_sidebar(Some(&build_sidebar(&ui)));
     split_view.set_content(Some(&build_preview_pane(&ui)));
@@ -274,15 +401,32 @@ fn build_window(application: &adw::Application) {
     }
 
     connect_actions(&ui);
-    let receiver_ui = ui.clone();
-    glib::timeout_add_local(Duration::from_millis(80), move || {
-        while let Ok(message) = receiver.try_recv() {
+    install_custom_theme(&ui);
+    let receiver_ui = Rc::clone(&ui);
+    glib::spawn_future_local(async move {
+        while let Ok(message) = receiver.recv().await {
             handle_message(&receiver_ui, message);
         }
-        glib::ControlFlow::Continue
+    });
+
+    let cancellation = Rc::clone(&ui.cancellation);
+    let application_hold = Rc::clone(&ui.application_hold);
+    let closing = Rc::clone(&ui.closing);
+    let sender = ui.sender.clone();
+    ui.window.connect_close_request(move |_| {
+        closing.set(true);
+        if let Some(token) = cancellation.borrow().as_ref() {
+            token.cancel();
+        } else {
+            application_hold.borrow_mut().take();
+            sender.close();
+        }
+        glib::Propagation::Proceed
     });
 
     request_devices(&ui);
+    update_control_states(&ui);
+    ui.window.set_default_widget(Some(&ui.scan_button));
     window.present();
 }
 
@@ -409,6 +553,7 @@ fn row_with_suffix(
         row.set_subtitle(subtitle);
     }
     row.add_suffix(widget);
+    row.set_activatable_widget(Some(widget));
     row
 }
 
@@ -425,6 +570,7 @@ fn build_preview() -> (gtk::Stack, gtk::Picture) {
     empty.set_valign(gtk::Align::Center);
     let icon = gtk::Image::from_icon_name("scanner-symbolic");
     icon.set_pixel_size(72);
+    icon.set_accessible_role(gtk::AccessibleRole::Presentation);
     icon.add_css_class("empty-preview-icon");
     let title = gtk::Label::builder().label("Noch keine Vorschau").build();
     title.add_css_class("title-2");
@@ -460,10 +606,16 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
     let sidebar_button = gtk::Button::builder()
         .icon_name("sidebar-show-symbolic")
         .tooltip_text("Einstellungen ein- oder ausblenden")
+        .action_name("win.toggle-sidebar")
         .build();
-    let split_view = ui.split_view.clone();
-    sidebar_button
-        .connect_clicked(move |_| split_view.set_show_sidebar(!split_view.shows_sidebar()));
+    sidebar_button.add_css_class("icon-action");
+    sidebar_button.update_property(&[
+        gtk::accessible::Property::Label("Einstellungen ein- oder ausblenden"),
+        gtk::accessible::Property::Description(
+            "Öffnet oder schließt die Seitenleiste mit den Scaneinstellungen",
+        ),
+        gtk::accessible::Property::KeyShortcuts("F10"),
+    ]);
     header.pack_start(&sidebar_button);
     toolbar.add_top_bar(&header);
 
@@ -484,30 +636,112 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
     toolbar
 }
 
-fn connect_actions(ui: &Ui) {
-    let device_ui = ui.clone();
-    ui.device_dropdown
-        .connect_selected_notify(move |_| update_device_tooltip(&device_ui));
+fn connect_actions(ui: &Rc<Ui>) {
+    let weak_ui = Rc::downgrade(ui);
+    ui.device_dropdown.connect_selected_notify(move |_| {
+        if let Some(ui) = weak_ui.upgrade() {
+            update_device_tooltip(&ui);
+        }
+    });
 
-    let threshold = ui.threshold.clone();
-    ui.auto_threshold
-        .connect_active_notify(move |switch| threshold.set_sensitive(!switch.is_active()));
+    let weak_ui = Rc::downgrade(ui);
+    ui.auto_threshold.connect_active_notify(move |_| {
+        if let Some(ui) = weak_ui.upgrade() {
+            update_control_states(&ui);
+        }
+    });
 
-    let output_ui = ui.clone();
-    ui.output_button
-        .connect_clicked(move |_| choose_output_directory(&output_ui));
+    let weak_ui = Rc::downgrade(ui);
+    ui.mode_dropdown.connect_selected_notify(move |_| {
+        if let Some(ui) = weak_ui.upgrade() {
+            update_control_states(&ui);
+        }
+    });
 
-    let refresh_ui = ui.clone();
-    ui.refresh_button
-        .connect_clicked(move |_| request_devices(&refresh_ui));
+    let weak_ui = Rc::downgrade(ui);
+    ui.format_dropdown.connect_selected_notify(move |_| {
+        if let Some(ui) = weak_ui.upgrade() {
+            update_control_states(&ui);
+        }
+    });
 
-    let scan_ui = ui.clone();
-    ui.scan_button
-        .connect_clicked(move |_| start_scan(&scan_ui));
+    let weak_ui = Rc::downgrade(ui);
+    ui.output_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            choose_output_directory(&ui);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.refresh_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            request_devices(&ui);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.scan_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            start_scan(&ui);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.import_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            choose_import_file(&ui);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.cancel_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            cancel_current_work(&ui);
+        }
+    });
 
-    let import_ui = ui.clone();
-    ui.import_button
-        .connect_clicked(move |_| choose_import_file(&import_ui));
+    let toggle_sidebar = gio::SimpleAction::new("toggle-sidebar", None);
+    let weak_ui = Rc::downgrade(ui);
+    toggle_sidebar.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            ui.split_view
+                .set_show_sidebar(!ui.split_view.shows_sidebar());
+        }
+    });
+
+    let close = gio::SimpleAction::new("close", None);
+    let weak_ui = Rc::downgrade(ui);
+    close.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            ui.window.close();
+        }
+    });
+
+    ui.window.add_action(&ui.scan_action);
+    ui.window.add_action(&ui.import_action);
+    ui.window.add_action(&ui.refresh_action);
+    ui.window.add_action(&ui.output_action);
+    ui.window.add_action(&ui.cancel_action);
+    ui.window.add_action(&toggle_sidebar);
+    ui.window.add_action(&close);
+
+    if let Some(application) = ui.window.application() {
+        application.set_accels_for_action("win.scan", &["F9"]);
+        application.set_accels_for_action("win.import", &["<Primary>o"]);
+        application.set_accels_for_action("win.refresh", &["<Primary>r"]);
+        application.set_accels_for_action("win.choose-output", &["<Primary>l"]);
+        application.set_accels_for_action("win.toggle-sidebar", &["F10"]);
+        application.set_accels_for_action("win.cancel", &["Escape"]);
+        application.set_accels_for_action("win.close", &["<Primary>q"]);
+    }
+}
+
+fn update_control_states(ui: &Ui) {
+    let idle = !ui.busy.get();
+    let splitting = idle && ui.mode_dropdown.selected() == 0;
+    ui.auto_threshold.set_sensitive(splitting);
+    ui.threshold
+        .set_sensitive(splitting && !ui.auto_threshold.is_active());
+    ui.min_area.set_sensitive(splitting);
+    ui.padding.set_sensitive(splitting);
+    ui.quality
+        .set_sensitive(idle && ui.format_dropdown.selected() == 0);
 }
 
 fn update_device_tooltip(ui: &Ui) {
@@ -538,7 +772,7 @@ fn choose_output_directory(ui: &Ui) {
     });
 }
 
-fn choose_import_file(ui: &Ui) {
+fn choose_import_file(ui: &Rc<Ui>) {
     if ui.busy.get() {
         return;
     }
@@ -554,7 +788,7 @@ fn choose_import_file(ui: &Ui) {
     let filters = gio::ListStore::new::<gtk::FileFilter>();
     filters.append(&filter);
     dialog.set_filters(Some(&filters));
-    let import_ui = ui.clone();
+    let import_ui = Rc::clone(ui);
     dialog.open(Some(&ui.window), None::<&gio::Cancellable>, move |result| {
         if let Ok(file) = result
             && let Some(path) = file.path()
@@ -565,8 +799,23 @@ fn choose_import_file(ui: &Ui) {
 }
 
 fn collect_config(ui: &Ui, scanned: bool) -> Result<SplitConfig> {
-    let capture_date = NaiveDate::parse_from_str(ui.date_entry.text().trim(), "%d.%m.%Y")
-        .context("Aufnahmedatum muss als TT.MM.JJJJ angegeben werden")?;
+    let capture_date = match NaiveDate::parse_from_str(ui.date_entry.text().trim(), "%d.%m.%Y") {
+        Ok(date) => {
+            ui.date_entry
+                .update_state(&[gtk::accessible::State::Invalid(
+                    gtk::AccessibleInvalidState::False,
+                )]);
+            date
+        }
+        Err(error) => {
+            ui.date_entry
+                .update_state(&[gtk::accessible::State::Invalid(
+                    gtk::AccessibleInvalidState::True,
+                )]);
+            ui.date_entry.grab_focus();
+            return Err(error).context("Aufnahmedatum muss als TT.MM.JJJJ angegeben werden");
+        }
+    };
     let dpi = match ui.dpi_dropdown.selected() {
         0 => 300,
         2 => 1200,
@@ -609,11 +858,22 @@ fn start_scan(ui: &Ui) {
     let dpi = config.dpi.unwrap_or(600);
     let output = ui.output_directory.borrow().clone();
     let sender = ui.sender.clone();
+    let (operation_id, cancellation) = begin_operation(ui);
     set_busy(ui, true, &format!("Scanne mit {dpi} dpi …"));
     thread::spawn(move || {
-        let result = scan_work(&device, dpi, &output, &config, full_scan)
-            .map_err(|error| format!("{error:#}"));
-        let _ = sender.send(Message::Work(result));
+        let result = run_worker(|| {
+            scan_work(&device, dpi, &output, &config, full_scan, &cancellation).map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CANCELLED_MESSAGE.to_string()
+                } else {
+                    format!("{error:#}")
+                }
+            })
+        });
+        let _ = sender.send_blocking(Message::Work {
+            operation_id,
+            result,
+        });
     });
 }
 
@@ -623,24 +883,38 @@ fn scan_work(
     output: &Path,
     config: &SplitConfig,
     full_scan: bool,
+    cancellation: &ScannerCancellation,
 ) -> Result<WorkResult> {
+    ensure_not_cancelled(cancellation)?;
     let temporary = TempDir::with_prefix("photoscanner-")?;
     let source = temporary.path().join("scan.png");
-    scan_to_file(&source, Some(&device.name), dpi, Duration::from_secs(600))?;
+    scan_to_file_cancellable(
+        &source,
+        Some(&device.name),
+        dpi,
+        Duration::from_secs(600),
+        cancellation,
+    )?;
+    ensure_not_cancelled(cancellation)?;
     if full_scan {
         let path = save_full_scan(&source, output, config, None)?;
+        ensure_not_cancelled(cancellation)?;
+        let (preview, preview_directory) = bounded_preview(&path)?;
         return Ok(WorkResult {
             title: "Vollständiger Scan gespeichert".to_string(),
             detail: path.display().to_string(),
-            preview: path,
+            preview,
+            preview_directory,
         });
     }
     let result = split_scan(&source, output, config, None, true)?;
-    let preview = result
+    ensure_not_cancelled(cancellation)?;
+    let preview_source = result
         .preview
         .clone()
         .or_else(|| result.files.first().cloned())
         .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
+    let (preview, preview_directory) = bounded_preview(&preview_source)?;
     Ok(WorkResult {
         title: format!("{} Foto(s) gespeichert", result.files.len()),
         detail: format!(
@@ -649,6 +923,7 @@ fn scan_work(
             result.threshold_used
         ),
         preview,
+        preview_directory,
     })
 }
 
@@ -663,32 +938,60 @@ fn start_import(ui: &Ui, source: PathBuf) {
             return;
         }
     };
+    let full_scan = ui.mode_dropdown.selected() == 1;
     let output = ui.output_directory.borrow().clone();
     let sender = ui.sender.clone();
+    let (operation_id, cancellation) = begin_operation(ui);
     set_busy(ui, true, "Analysiere Scandatei …");
     thread::spawn(move || {
-        let result = (|| -> Result<WorkResult> {
-            if !source.is_file() {
-                bail!("Die Scandatei existiert nicht mehr: {}", source.display());
-            }
-            let result = split_scan(&source, &output, &config, None, true)?;
-            let preview = result
-                .preview
-                .clone()
-                .or_else(|| result.files.first().cloned())
-                .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
-            Ok(WorkResult {
-                title: format!("{} Foto(s) aus Datei gespeichert", result.files.len()),
-                detail: format!(
-                    "{} · Schwellwert {:.1}",
-                    output.display(),
-                    result.threshold_used
-                ),
-                preview,
+        let result = run_worker(|| {
+            (|| -> Result<WorkResult> {
+                ensure_not_cancelled(&cancellation)?;
+                if !source.is_file() {
+                    bail!("Die Scandatei existiert nicht mehr: {}", source.display());
+                }
+                if full_scan {
+                    let path = save_full_scan(&source, &output, &config, None)?;
+                    ensure_not_cancelled(&cancellation)?;
+                    let (preview, preview_directory) = bounded_preview(&path)?;
+                    return Ok(WorkResult {
+                        title: "Vollständige Scandatei gespeichert".to_string(),
+                        detail: path.display().to_string(),
+                        preview,
+                        preview_directory,
+                    });
+                }
+                let result = split_scan(&source, &output, &config, None, true)?;
+                ensure_not_cancelled(&cancellation)?;
+                let preview_source = result
+                    .preview
+                    .clone()
+                    .or_else(|| result.files.first().cloned())
+                    .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
+                let (preview, preview_directory) = bounded_preview(&preview_source)?;
+                Ok(WorkResult {
+                    title: format!("{} Foto(s) aus Datei gespeichert", result.files.len()),
+                    detail: format!(
+                        "{} · Schwellwert {:.1}",
+                        output.display(),
+                        result.threshold_used
+                    ),
+                    preview,
+                    preview_directory,
+                })
+            })()
+            .map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CANCELLED_MESSAGE.to_string()
+                } else {
+                    format!("{error:#}")
+                }
             })
-        })()
-        .map_err(|error| format!("{error:#}"));
-        let _ = sender.send(Message::Work(result));
+        });
+        let _ = sender.send_blocking(Message::Work {
+            operation_id,
+            result,
+        });
     });
 }
 
@@ -696,20 +999,52 @@ fn request_devices(ui: &Ui) {
     if ui.busy.get() {
         return;
     }
-    ui.refresh_button.set_sensitive(false);
-    ui.scan_button.set_sensitive(false);
-    ui.status_label.set_label("Suche Scanner …");
+    let (operation_id, cancellation) = begin_operation(ui);
+    ui.refresh_action.set_enabled(false);
+    ui.scan_action.set_enabled(false);
+    set_status(
+        ui,
+        "Suche Scanner …",
+        gtk::AccessibleAnnouncementPriority::Low,
+    );
     ui.spinner.start();
     let sender = ui.sender.clone();
     thread::spawn(move || {
-        let result = list_devices(Duration::from_secs(15)).map_err(|error| error.to_string());
-        let _ = sender.send(Message::Devices(result));
+        let result = run_worker(|| {
+            list_devices_cancellable(Duration::from_secs(15), &cancellation).map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CANCELLED_MESSAGE.to_string()
+                } else {
+                    error.to_string()
+                }
+            })
+        });
+        let _ = sender.send_blocking(Message::Devices {
+            operation_id,
+            result,
+        });
     });
 }
 
 fn handle_message(ui: &Ui, message: Message) {
+    let message_operation_id = match &message {
+        Message::Devices { operation_id, .. } | Message::Work { operation_id, .. } => *operation_id,
+    };
+    if message_operation_id != ui.operation_id.get() {
+        return;
+    }
+    ui.cancellation.borrow_mut().take();
+    ui.application_hold.borrow_mut().take();
+    if ui.closing.get() {
+        ui.sender.close();
+        return;
+    }
+
     match message {
-        Message::Devices(Ok(devices)) => {
+        Message::Devices {
+            result: Ok(devices),
+            ..
+        } => {
             while ui.device_model.n_items() > 0 {
                 ui.device_model.remove(0);
             }
@@ -719,49 +1054,95 @@ fn handle_message(ui: &Ui, message: Message) {
             *ui.devices.borrow_mut() = devices;
             ui.device_dropdown.set_selected(0);
             update_device_tooltip(ui);
-            ui.refresh_button.set_sensitive(true);
+            ui.refresh_action.set_enabled(true);
             ui.spinner.stop();
             if ui.devices.borrow().is_empty() {
                 ui.device_model.append("Kein Scanner erkannt");
-                ui.scan_button.set_sensitive(false);
-                ui.status_label.set_label("Kein Scanner erkannt");
+                ui.scan_action.set_enabled(false);
+                set_status(
+                    ui,
+                    "Kein Scanner erkannt",
+                    gtk::AccessibleAnnouncementPriority::Medium,
+                );
+                ui.import_button.grab_focus();
             } else {
-                ui.scan_button.set_sensitive(true);
-                ui.status_label.set_label("Scanner bereit");
+                ui.scan_action.set_enabled(true);
+                set_status(
+                    ui,
+                    "Scanner bereit",
+                    gtk::AccessibleAnnouncementPriority::Low,
+                );
+                ui.device_dropdown.grab_focus();
             }
         }
-        Message::Devices(Err(error)) => {
-            ui.refresh_button.set_sensitive(true);
-            ui.scan_button
-                .set_sensitive(!ui.devices.borrow().is_empty());
+        Message::Devices {
+            result: Err(error), ..
+        } => {
+            ui.refresh_action.set_enabled(true);
+            ui.scan_action.set_enabled(!ui.devices.borrow().is_empty());
             ui.spinner.stop();
-            ui.status_label.set_label("Scannersuche fehlgeschlagen");
-            show_error(ui, &error);
+            if error != CANCELLED_MESSAGE {
+                show_error(ui, &error);
+                ui.refresh_button.grab_focus();
+            }
         }
-        Message::Work(Ok(result)) => {
+        Message::Work {
+            result: Ok(result), ..
+        } => {
             set_busy(ui, false, &result.title);
-            ui.status_label
-                .set_label(&format!("{}\n{}", result.title, result.detail));
+            set_status(
+                ui,
+                &format!("{}\n{}", result.title, result.detail),
+                gtk::AccessibleAnnouncementPriority::Medium,
+            );
             ui.picture
                 .set_file(Some(&gio::File::for_path(&result.preview)));
+            ui.picture.update_property(&[
+                gtk::accessible::Property::Label("Scanvorschau"),
+                gtk::accessible::Property::Description(&result.title),
+            ]);
+            *ui.preview_directory.borrow_mut() = Some(result.preview_directory);
             ui.preview_stack.set_visible_child_name("picture");
             ui.toast_overlay.add_toast(adw::Toast::new(&result.title));
         }
-        Message::Work(Err(error)) => {
-            set_busy(ui, false, "Vorgang fehlgeschlagen");
-            show_error(ui, &error);
+        Message::Work {
+            result: Err(error), ..
+        } => {
+            if error.starts_with(CANCELLED_MESSAGE) {
+                set_busy(ui, false, "Vorgang abgebrochen");
+            } else {
+                set_busy(ui, false, "Vorgang fehlgeschlagen");
+                show_error(ui, &error);
+            }
         }
     }
 }
 
 fn set_busy(ui: &Ui, busy: bool, status: &str) {
     ui.busy.set(busy);
-    ui.scan_button
-        .set_sensitive(!busy && !ui.devices.borrow().is_empty());
-    ui.import_button.set_sensitive(!busy);
-    ui.refresh_button.set_sensitive(!busy);
-    ui.output_button.set_sensitive(!busy);
-    ui.status_label.set_label(status);
+    ui.scan_action
+        .set_enabled(!busy && !ui.devices.borrow().is_empty());
+    ui.import_action.set_enabled(!busy);
+    ui.refresh_action.set_enabled(!busy);
+    ui.output_action.set_enabled(!busy);
+    ui.cancel_action.set_enabled(busy);
+    ui.device_dropdown.set_sensitive(!busy);
+    ui.mode_dropdown.set_sensitive(!busy);
+    ui.dpi_dropdown.set_sensitive(!busy);
+    ui.format_dropdown.set_sensitive(!busy);
+    ui.date_entry.set_sensitive(!busy);
+    update_control_states(ui);
+    ui.preview_stack
+        .update_state(&[gtk::accessible::State::Busy(busy)]);
+    set_status(
+        ui,
+        status,
+        if busy {
+            gtk::AccessibleAnnouncementPriority::Low
+        } else {
+            gtk::AccessibleAnnouncementPriority::Medium
+        },
+    );
     if busy {
         ui.spinner.start();
     } else {
@@ -770,7 +1151,106 @@ fn set_busy(ui: &Ui, busy: bool, status: &str) {
 }
 
 fn show_error(ui: &Ui, message: &str) {
-    ui.status_label.set_label(message);
+    set_status(ui, message, gtk::AccessibleAnnouncementPriority::High);
     ui.toast_overlay
         .add_toast(adw::Toast::builder().title(message).timeout(6).build());
+}
+
+fn set_status(ui: &Ui, message: &str, priority: gtk::AccessibleAnnouncementPriority) {
+    ui.status_label.set_label(message);
+    ui.status_label.announce(message, priority);
+}
+
+fn begin_operation(ui: &Ui) -> (u64, ScannerCancellation) {
+    if let Some(previous) = ui.cancellation.borrow_mut().take() {
+        previous.cancel();
+    }
+    ui.application_hold.borrow_mut().take();
+    let operation_id = ui.operation_id.get().wrapping_add(1);
+    ui.operation_id.set(operation_id);
+    let cancellation = ScannerCancellation::new();
+    *ui.cancellation.borrow_mut() = Some(cancellation.clone());
+    *ui.application_hold.borrow_mut() = ui
+        .window
+        .application()
+        .map(|application| application.hold());
+    (operation_id, cancellation)
+}
+
+fn cancel_current_work(ui: &Ui) {
+    if let Some(cancellation) = ui.cancellation.borrow().as_ref() {
+        cancellation.cancel();
+        ui.cancel_action.set_enabled(false);
+        set_status(
+            ui,
+            "Abbruch angefordert …",
+            gtk::AccessibleAnnouncementPriority::Medium,
+        );
+    }
+}
+
+fn ensure_not_cancelled(cancellation: &ScannerCancellation) -> Result<()> {
+    if cancellation.is_cancelled() {
+        bail!(CANCELLED_MESSAGE);
+    }
+    Ok(())
+}
+
+fn run_worker<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|_| Err(WORKER_PANIC_MESSAGE.to_string()))
+}
+
+fn bounded_preview(source: &Path) -> Result<(PathBuf, TempDir)> {
+    let image = imgcodecs::imread(source, imgcodecs::IMREAD_COLOR)
+        .with_context(|| format!("Vorschau konnte nicht gelesen werden: {}", source.display()))?;
+    if image.empty() {
+        bail!("Vorschau enthält keine Bilddaten: {}", source.display());
+    }
+
+    let largest_edge = image.cols().max(image.rows());
+    let scale = (PREVIEW_MAX_EDGE as f64 / largest_edge as f64).min(1.0);
+    let mut preview = Mat::default();
+    if scale < 1.0 {
+        let target = Size::new(
+            (image.cols() as f64 * scale).round().max(1.0) as i32,
+            (image.rows() as f64 * scale).round().max(1.0) as i32,
+        );
+        imgproc::resize(&image, &mut preview, target, 0.0, 0.0, imgproc::INTER_AREA)?;
+    } else {
+        preview = image;
+    }
+
+    let directory = TempDir::with_prefix("photoscanner-preview-")?;
+    let path = directory.path().join("preview.jpg");
+    let parameters = Vector::from_slice(&[imgcodecs::IMWRITE_JPEG_QUALITY, 86]);
+    if !imgcodecs::imwrite(&path, &preview, &parameters)? {
+        bail!("Vorschaudatei konnte nicht gespeichert werden");
+    }
+    Ok((path, directory))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencv::core::{CV_8UC3, Scalar};
+
+    #[test]
+    fn bounded_preview_limits_the_largest_edge() {
+        let source_directory = TempDir::new().unwrap();
+        let source = source_directory.path().join("large.png");
+        let image = Mat::new_rows_cols_with_default(
+            1200,
+            2400,
+            CV_8UC3,
+            Scalar::new(40.0, 80.0, 120.0, 0.0),
+        )
+        .unwrap();
+        assert!(imgcodecs::imwrite_def(&source, &image).unwrap());
+
+        let (preview, owner) = bounded_preview(&source).unwrap();
+        assert!(preview.starts_with(owner.path()));
+        let image = imgcodecs::imread(&preview, imgcodecs::IMREAD_COLOR).unwrap();
+        assert_eq!(image.cols().max(image.rows()), PREVIEW_MAX_EDGE);
+        assert_eq!((image.cols(), image.rows()), (1600, 800));
+    }
 }

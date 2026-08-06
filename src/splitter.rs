@@ -1,14 +1,10 @@
 use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use chrono::{DateTime, Local, NaiveDate, TimeZone, Timelike};
-use filetime::{FileTime, set_file_mtime};
-use little_exif::exif_tag::ExifTag;
-use little_exif::metadata::Metadata;
-use little_exif::rational::uR64;
 use opencv::core::{
     self, CV_8UC1, Mat, Point, Point2f, RotatedRect, Scalar, Size, Size2f, Vec3b, Vector,
 };
@@ -16,35 +12,59 @@ use opencv::geometry;
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
+use tempfile::{Builder as TempFileBuilder, NamedTempFile, TempPath};
 use thiserror::Error;
 
+const MIN_DETECTION_SIZE: i32 = 256;
+const MAX_DETECTION_SIZE: i32 = 4096;
+const MAX_INPUT_DIMENSION: u32 = 30_000;
+const MAX_INPUT_PIXELS: u64 = 180_000_000;
+const MAX_IMAGE_HEADER_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_PREFIX_BYTES: usize = 128;
+const MAX_PREVIEW_SIZE: i32 = 2000;
+
 #[derive(Debug, Error)]
+/// Fehler bei der Validierung, Bildanalyse oder Veröffentlichung von Scans.
 pub enum SplitError {
+    /// Eine Konfiguration oder Eingabeeigenschaft ist ungültig.
     #[error("{0}")]
     InvalidConfig(String),
+    /// Die angegebene Quelldatei existiert nicht.
     #[error("Die Eingabedatei existiert nicht: {0}")]
     MissingSource(PathBuf),
+    /// OpenCV konnte ein Bild nicht verarbeiten.
     #[error("Bild konnte nicht verarbeitet werden: {0}")]
     OpenCv(#[from] opencv::Error),
+    /// Eine Dateisystemoperation ist fehlgeschlagen.
     #[error("Dateioperation fehlgeschlagen: {0}")]
     Io(#[from] std::io::Error),
+    /// Metadaten konnten nicht gelesen oder geschrieben werden.
+    #[error("Bildmetadaten konnten nicht verarbeitet werden: {0}")]
+    Metadata(String),
+    /// Im Scan wurde kein einzelnes Foto erkannt.
     #[error(
         "Keine einzelnen Fotos erkannt. Lege zwischen den Fotos Abstand frei oder versuche einen kleineren Schwellwert."
     )]
     NothingDetected,
+    /// Das Aufnahmedatum lässt sich in der lokalen Zeitzone nicht darstellen.
     #[error("Das ausgewählte Aufnahmedatum ist in der lokalen Zeitzone ungültig.")]
     InvalidDate,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Unterstützte Ausgabeformate für Scans und getrennte Fotos.
 pub enum OutputFormat {
+    /// JPEG mit einstellbarer Qualität.
     #[default]
     Jpeg,
+    /// Verlustfreies PNG.
     Png,
+    /// Verlustfrei komprimiertes TIFF.
     Tiff,
 }
 
 impl OutputFormat {
+    /// Liefert die kanonische Dateiendung ohne Punkt.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Jpeg => "jpg",
@@ -80,14 +100,23 @@ impl FromStr for OutputFormat {
 }
 
 #[derive(Clone, Debug)]
+/// Parameter für Fotoerkennung und Export.
 pub struct SplitConfig {
+    /// Kleinste akzeptierte Fotofläche relativ zur Scanfläche in Prozent.
     pub min_area_percent: f64,
+    /// Manueller Schwellwert oder `None` für automatische Bestimmung.
     pub threshold: Option<f64>,
+    /// Zusätzlicher Rand um erkannte Fotos in Prozent.
     pub padding_percent: f64,
+    /// Maximale Kantenlänge des verkleinerten Erkennungsbilds.
     pub max_detection_size: i32,
+    /// Dateiformat der exportierten Bilder.
     pub output_format: OutputFormat,
+    /// JPEG-Qualität von 1 bis 100.
     pub jpeg_quality: i32,
+    /// Zu schreibende Auflösung oder `None` zur Übernahme aus der Quelle.
     pub dpi: Option<u32>,
+    /// Aufnahmedatum oder `None` für das aktuelle lokale Datum.
     pub capture_date: Option<NaiveDate>,
 }
 
@@ -107,6 +136,7 @@ impl Default for SplitConfig {
 }
 
 impl SplitConfig {
+    /// Prüft alle Werte gegen die unterstützten und ressourcensicheren Grenzen.
     pub fn validate(&self) -> Result<(), SplitError> {
         if !(0.1..=50.0).contains(&self.min_area_percent) {
             return Err(SplitError::InvalidConfig(
@@ -126,6 +156,11 @@ impl SplitConfig {
                 "Der Rand muss zwischen 0 und 15 Prozent liegen.".to_string(),
             ));
         }
+        if !(MIN_DETECTION_SIZE..=MAX_DETECTION_SIZE).contains(&self.max_detection_size) {
+            return Err(SplitError::InvalidConfig(format!(
+                "Die maximale Erkennungsgröße muss zwischen {MIN_DETECTION_SIZE} und {MAX_DETECTION_SIZE} Pixeln liegen."
+            )));
+        }
         if !(1..=100).contains(&self.jpeg_quality) {
             return Err(SplitError::InvalidConfig(
                 "Die JPEG-Qualität muss zwischen 1 und 100 liegen.".to_string(),
@@ -135,47 +170,250 @@ impl SplitConfig {
     }
 }
 
+fn validate_prefix(prefix: &str) -> Result<(), SplitError> {
+    let mut components = Path::new(prefix).components();
+    let is_single_normal_component = matches!(components.next(), Some(Component::Normal(value)) if value == prefix)
+        && components.next().is_none();
+    if !is_single_normal_component
+        || prefix.len() > MAX_PREFIX_BYTES
+        || prefix.chars().any(char::is_control)
+        || prefix.contains('\\')
+    {
+        return Err(SplitError::InvalidConfig(format!(
+            "Der Dateipräfix muss aus genau einem sicheren Dateinamen mit höchstens {MAX_PREFIX_BYTES} Bytes bestehen."
+        )));
+    }
+    Ok(())
+}
+
+fn validate_image_dimensions(width: u32, height: u32) -> Result<(), SplitError> {
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| {
+            SplitError::InvalidConfig("Die Bildabmessungen sind ungültig.".to_string())
+        })?;
+    if width < 20 || height < 20 {
+        return Err(SplitError::InvalidConfig(
+            "Das Scanbild ist zu klein oder hat ein ungültiges Format.".to_string(),
+        ));
+    }
+    if width > MAX_INPUT_DIMENSION || height > MAX_INPUT_DIMENSION || pixels > MAX_INPUT_PIXELS {
+        return Err(SplitError::InvalidConfig(format!(
+            "Das Bild ist mit {width}×{height} Pixeln zu groß. Erlaubt sind höchstens {MAX_INPUT_PIXELS} Pixel und {MAX_INPUT_DIMENSION} Pixel je Kante."
+        )));
+    }
+    Ok(())
+}
+
+fn read_u16(bytes: [u8; 2], little_endian: bool) -> u16 {
+    if little_endian {
+        u16::from_le_bytes(bytes)
+    } else {
+        u16::from_be_bytes(bytes)
+    }
+}
+
+fn read_u32(bytes: [u8; 4], little_endian: bool) -> u32 {
+    if little_endian {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    }
+}
+
+fn jpeg_dimensions(file: &mut File) -> Result<Option<(u32, u32)>, std::io::Error> {
+    let mut file = BufReader::new(file);
+    file.seek(SeekFrom::Start(2))?;
+    let mut position = 2u64;
+    loop {
+        if position >= MAX_IMAGE_HEADER_BYTES {
+            return Ok(None);
+        }
+        let mut byte = [0u8; 1];
+        file.read_exact(&mut byte)?;
+        position += 1;
+        while byte[0] != 0xff {
+            if position >= MAX_IMAGE_HEADER_BYTES {
+                return Ok(None);
+            }
+            file.read_exact(&mut byte)?;
+            position += 1;
+        }
+        while byte[0] == 0xff {
+            if position >= MAX_IMAGE_HEADER_BYTES {
+                return Ok(None);
+            }
+            file.read_exact(&mut byte)?;
+            position += 1;
+        }
+        let marker = byte[0];
+        if marker == 0xd9 || marker == 0xda {
+            return Ok(None);
+        }
+        if marker == 0xd8 || marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
+            continue;
+        }
+        let mut length = [0u8; 2];
+        file.read_exact(&mut length)?;
+        position += 2;
+        let length = u16::from_be_bytes(length);
+        if length < 2 {
+            return Ok(None);
+        }
+        if matches!(
+            marker,
+            0xc0 | 0xc1
+                | 0xc2
+                | 0xc3
+                | 0xc5
+                | 0xc6
+                | 0xc7
+                | 0xc9
+                | 0xca
+                | 0xcb
+                | 0xcd
+                | 0xce
+                | 0xcf
+        ) {
+            if length < 7 {
+                return Ok(None);
+            }
+            let mut dimensions = [0u8; 5];
+            file.read_exact(&mut dimensions)?;
+            let height = u16::from_be_bytes([dimensions[1], dimensions[2]]) as u32;
+            let width = u16::from_be_bytes([dimensions[3], dimensions[4]]) as u32;
+            return Ok(Some((width, height)));
+        }
+        let next_position = position
+            .checked_add(u64::from(length - 2))
+            .filter(|position| *position <= MAX_IMAGE_HEADER_BYTES);
+        let Some(next_position) = next_position else {
+            return Ok(None);
+        };
+        file.seek(SeekFrom::Start(next_position))?;
+        position = next_position;
+    }
+}
+
+fn tiff_dimensions(
+    file: &mut File,
+    header: &[u8; 8],
+) -> Result<Option<(u32, u32)>, std::io::Error> {
+    let little_endian = &header[..2] == b"II";
+    if (!little_endian && &header[..2] != b"MM")
+        || read_u16([header[2], header[3]], little_endian) != 42
+    {
+        return Ok(None);
+    }
+    let ifd_offset = read_u32(header[4..8].try_into().unwrap(), little_endian);
+    if u64::from(ifd_offset) + 2 > MAX_IMAGE_HEADER_BYTES {
+        return Ok(None);
+    }
+    file.seek(SeekFrom::Start(u64::from(ifd_offset)))?;
+    let mut entry_count = [0u8; 2];
+    file.read_exact(&mut entry_count)?;
+    let entry_count = read_u16(entry_count, little_endian);
+    if u64::from(ifd_offset) + 2 + u64::from(entry_count) * 12 > MAX_IMAGE_HEADER_BYTES {
+        return Ok(None);
+    }
+    let mut width = None;
+    let mut height = None;
+    for _ in 0..entry_count {
+        let mut entry = [0u8; 12];
+        file.read_exact(&mut entry)?;
+        let tag = read_u16(entry[..2].try_into().unwrap(), little_endian);
+        if tag != 256 && tag != 257 {
+            continue;
+        }
+        let value_type = read_u16(entry[2..4].try_into().unwrap(), little_endian);
+        let count = read_u32(entry[4..8].try_into().unwrap(), little_endian);
+        if count != 1 {
+            return Ok(None);
+        }
+        let value = match value_type {
+            3 => u32::from(read_u16(entry[8..10].try_into().unwrap(), little_endian)),
+            4 => read_u32(entry[8..12].try_into().unwrap(), little_endian),
+            _ => return Ok(None),
+        };
+        if tag == 256 {
+            width = Some(value);
+        } else {
+            height = Some(value);
+        }
+        if width.is_some() && height.is_some() {
+            break;
+        }
+    }
+    Ok(width.zip(height))
+}
+
+fn image_dimensions(path: &Path) -> Result<(u32, u32), SplitError> {
+    let mut file = File::open(path)?;
+    let mut header = [0u8; 24];
+    file.read_exact(&mut header).map_err(|error| {
+        SplitError::InvalidConfig(format!("Bildkopf konnte nicht gelesen werden: {error}"))
+    })?;
+    let dimensions = if header.starts_with(b"\x89PNG\r\n\x1a\n") {
+        (&header[12..16] == b"IHDR").then(|| {
+            (
+                u32::from_be_bytes(header[16..20].try_into().unwrap()),
+                u32::from_be_bytes(header[20..24].try_into().unwrap()),
+            )
+        })
+    } else if header.starts_with(b"\xff\xd8") {
+        jpeg_dimensions(&mut file)?
+    } else if header.starts_with(b"II") || header.starts_with(b"MM") {
+        tiff_dimensions(&mut file, header[..8].try_into().unwrap())?
+    } else {
+        None
+    };
+    dimensions.ok_or_else(|| {
+        SplitError::InvalidConfig(
+            "Bildabmessungen konnten vor dem Laden nicht sicher geprüft werden. Unterstützt werden PNG, JPEG und TIFF."
+                .to_string(),
+        )
+    })
+}
+
 #[derive(Debug)]
+/// Ein erkanntes und perspektivisch korrigiertes Foto.
 pub struct DetectedPhoto {
+    /// Aus der Scanfläche ausgeschnittenes und begradigtes Bild.
     pub image: Mat,
+    /// Mittelpunkt des Fotos im Koordinatensystem des Quellbilds.
     pub center: Point2f,
+    /// Vier Eckpunkte des Fotos im Quellbild.
     pub source_box: [Point2f; 4],
+    /// Flächenanteil des Fotos an der gesamten Scanfläche in Prozent.
     pub area_percent: f64,
 }
 
 #[derive(Clone, Debug)]
+struct PhotoRegion {
+    center: Point2f,
+    source_box: [Point2f; 4],
+    area_percent: f64,
+}
+
+#[derive(Clone, Debug)]
+/// Ergebnis einer vollständig veröffentlichten Scanaufteilung.
 pub struct SplitResult {
+    /// Kollisionsfrei angelegte Bilddateien.
     pub files: Vec<PathBuf>,
+    /// Optionale, begrenzte Kontrollvorschau mit Markierungen.
     pub preview: Option<PathBuf>,
+    /// Tatsächlich verwendeter Erkennungsschwellwert.
     pub threshold_used: f64,
 }
 
-fn image_orientation(path: &Path) -> Option<u16> {
-    let metadata = Metadata::new_from_path(path).ok()?;
-    metadata
-        .get_tag_by_hex(0x0112, None)
-        .find_map(|tag| match tag {
-            ExifTag::Orientation(values) => values.first().copied(),
-            _ => None,
-        })
+fn metadata_error(error: impl std::fmt::Display) -> SplitError {
+    SplitError::Metadata(error.to_string())
 }
 
-fn image_dpi(path: &Path) -> Option<u32> {
-    Metadata::new_from_path(path)
-        .ok()
-        .and_then(|metadata| {
-            metadata
-                .get_tag_by_hex(0x011a, None)
-                .find_map(|tag| match tag {
-                    ExifTag::XResolution(values) => values.first().and_then(|value| {
-                        (value.denominator != 0).then_some(
-                            (value.nominator as f64 / value.denominator as f64).round() as u32,
-                        )
-                    }),
-                    _ => None,
-                })
-        })
-        .or_else(|| container_dpi(path))
+fn image_dpi(path: &Path) -> Result<Option<u32>, SplitError> {
+    Ok(crate::metadata::image_dpi(path)
+        .map_err(metadata_error)?
+        .or_else(|| container_dpi(path)))
 }
 
 fn container_dpi(path: &Path) -> Option<u32> {
@@ -220,13 +458,25 @@ fn read_image(path: &Path) -> Result<(Mat, Option<u32>), SplitError> {
     if !path.is_file() {
         return Err(SplitError::MissingSource(path.to_path_buf()));
     }
-    let mut image = imgcodecs::imread(path, imgcodecs::IMREAD_COLOR)?;
-    if image.empty() || image.rows() < 20 || image.cols() < 20 {
+    let (width, height) = image_dimensions(path)?;
+    validate_image_dimensions(width, height)?;
+    let mut image = imgcodecs::imread(
+        path,
+        imgcodecs::IMREAD_COLOR | imgcodecs::IMREAD_IGNORE_ORIENTATION,
+    )?;
+    if image.empty()
+        || image.rows() < 20
+        || image.cols() < 20
+        || image.cols() as u32 != width
+        || image.rows() as u32 != height
+    {
         return Err(SplitError::InvalidConfig(
-            "Das Scanbild ist zu klein oder hat ein ungültiges Format.".to_string(),
+            "Das Scanbild hat ein ungültiges Format oder widersprüchliche Abmessungen.".to_string(),
         ));
     }
-    if let Some(orientation) = image_orientation(path) {
+    let orientation = crate::metadata::image_orientation(path).map_err(metadata_error)?;
+    let dpi = image_dpi(path)?;
+    if let Some(orientation) = orientation {
         let mut transformed = Mat::default();
         match orientation {
             2 => core::flip(&image, &mut transformed, 1)?,
@@ -240,11 +490,11 @@ fn read_image(path: &Path) -> Result<(Mat, Option<u32>), SplitError> {
                 core::flip(&transposed, &mut transformed, -1)?;
             }
             8 => core::rotate(&image, &mut transformed, core::ROTATE_90_COUNTERCLOCKWISE)?,
-            _ => return Ok((image, image_dpi(path))),
+            _ => return Ok((image, dpi)),
         }
         image = transformed;
     }
-    Ok((image, image_dpi(path)))
+    Ok((image, dpi))
 }
 
 fn scaled_for_detection(image: &Mat, maximum: i32) -> Result<(Mat, f32), SplitError> {
@@ -413,21 +663,17 @@ fn warp_photo(image: &Mat, source_box: [Point2f; 4]) -> Result<Mat, SplitError> 
     let transform = geometry::get_perspective_transform_slice_def(ordered, target)?;
     let mut warped = Mat::default();
     imgproc::warp_perspective_def(image, &mut warped, &transform, Size::new(width, height))?;
-    if warped.rows() > warped.cols() {
-        let mut rotated = Mat::default();
-        core::rotate(&warped, &mut rotated, core::ROTATE_90_CLOCKWISE)?;
-        warped = rotated;
-    }
     Ok(warped)
 }
 
-pub fn detect_photos(
+fn detect_photo_regions(
     image: &Mat,
     config: &SplitConfig,
-) -> Result<(Vec<DetectedPhoto>, f64), SplitError> {
+) -> Result<(Vec<PhotoRegion>, f64), SplitError> {
     config.validate()?;
     let (detection_image, scale) = scaled_for_detection(image, config.max_detection_size)?;
     let (mask, threshold) = foreground_mask(&detection_image, config.threshold)?;
+    drop(detection_image);
     let mut contours: Vector<Vector<Point>> = Vector::new();
     imgproc::find_contours_def(
         &mask,
@@ -468,12 +714,7 @@ pub fn detect_photos(
         });
         // Stable order makes previews and row sorting deterministic across OpenCV versions.
         source_box = order_box(source_box);
-        let photo = warp_photo(image, source_box)?;
-        if photo.rows().min(photo.cols()) < 10 {
-            continue;
-        }
-        detected.push(DetectedPhoto {
-            image: photo,
+        detected.push(PhotoRegion {
             center: Point2f::new(rectangle.center.x / scale, rectangle.center.y / scale),
             source_box,
             area_percent: area / scan_area * 100.0,
@@ -511,18 +752,107 @@ pub fn detect_photos(
     Ok((detected, threshold))
 }
 
-fn unique_path(directory: &Path, stem: &str, extension: &str) -> PathBuf {
-    let initial = directory.join(format!("{stem}.{extension}"));
-    if !initial.exists() {
-        return initial;
+/// Erkennt Fotos in einem bereits geladenen Bild und begradigt sie.
+///
+/// Die Reihenfolge verläuft zeilenweise von links nach rechts.
+pub fn detect_photos(
+    image: &Mat,
+    config: &SplitConfig,
+) -> Result<(Vec<DetectedPhoto>, f64), SplitError> {
+    let (regions, threshold) = detect_photo_regions(image, config)?;
+    let mut photos = Vec::with_capacity(regions.len());
+    for region in regions {
+        let photo = warp_photo(image, region.source_box)?;
+        if photo.rows().min(photo.cols()) < 10 {
+            continue;
+        }
+        photos.push(DetectedPhoto {
+            image: photo,
+            center: region.center,
+            source_box: region.source_box,
+            area_percent: region.area_percent,
+        });
     }
-    for counter in 2.. {
-        let candidate = directory.join(format!("{stem}_{counter}.{extension}"));
-        if !candidate.exists() {
-            return candidate;
+    Ok((photos, threshold))
+}
+
+struct StagedOutput {
+    temporary: TempPath,
+    stem: String,
+    extension: &'static str,
+}
+
+fn output_path(directory: &Path, output: &StagedOutput, attempt: usize) -> PathBuf {
+    let stem = if attempt == 1 {
+        output.stem.clone()
+    } else {
+        format!("{}_{attempt}", output.stem)
+    };
+    directory.join(format!("{stem}.{}", output.extension))
+}
+
+fn rollback_files(paths: &[PathBuf]) -> Result<(), std::io::Error> {
+    let mut first_error = None;
+    for path in paths.iter().rev() {
+        if let Err(error) = fs::remove_file(path)
+            && error.kind() != std::io::ErrorKind::NotFound
+            && first_error.is_none()
+        {
+            first_error = Some(error);
         }
     }
-    unreachable!()
+    first_error.map_or(Ok(()), Err)
+}
+
+fn commit_staged(staged: &[StagedOutput], destinations: &[PathBuf]) -> Result<(), std::io::Error> {
+    debug_assert_eq!(staged.len(), destinations.len());
+    let mut published = Vec::with_capacity(staged.len());
+    for (output, destination) in staged.iter().zip(destinations) {
+        if let Err(publish_error) = fs::hard_link(&output.temporary, destination) {
+            if let Err(rollback_error) = rollback_files(&published) {
+                return Err(std::io::Error::new(
+                    rollback_error.kind(),
+                    format!(
+                        "Veröffentlichen schlug fehl ({publish_error}); Zurückrollen schlug ebenfalls fehl ({rollback_error})"
+                    ),
+                ));
+            }
+            return Err(publish_error);
+        }
+        published.push(destination.clone());
+    }
+    Ok(())
+}
+
+fn publish_staged_group(
+    directory: &Path,
+    staged: Vec<StagedOutput>,
+) -> Result<Vec<PathBuf>, SplitError> {
+    let mut attempt = 1usize;
+    loop {
+        let destinations: Vec<_> = staged
+            .iter()
+            .map(|output| output_path(directory, output, attempt))
+            .collect();
+        match commit_staged(&staged, &destinations) {
+            Ok(()) => {
+                if let Err(error) = File::open(directory).and_then(|directory| directory.sync_all())
+                {
+                    rollback_files(&destinations)?;
+                    return Err(SplitError::Io(error));
+                }
+                return Ok(destinations);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt = attempt.checked_add(1).ok_or_else(|| {
+                    SplitError::InvalidConfig(
+                        "Es konnte kein freier Dateiname ermittelt werden.".to_string(),
+                    )
+                })?;
+            }
+            Err(error) => return Err(SplitError::Io(error)),
+        }
+    }
 }
 
 fn capture_datetime(date: Option<NaiveDate>) -> Result<DateTime<Local>, SplitError> {
@@ -535,41 +865,6 @@ fn capture_datetime(date: Option<NaiveDate>) -> Result<DateTime<Local>, SplitErr
         .from_local_datetime(&local)
         .earliest()
         .ok_or(SplitError::InvalidDate)
-}
-
-fn write_metadata(
-    path: &Path,
-    captured_at: DateTime<Local>,
-    dpi: Option<u32>,
-) -> Result<(), SplitError> {
-    let mut metadata = Metadata::new_from_path(path).unwrap_or_else(|_| Metadata::new());
-    let timestamp = captured_at.format("%Y:%m:%d %H:%M:%S").to_string();
-    let offset = captured_at.format("%:z").to_string();
-    metadata.set_tag(ExifTag::ModifyDate(timestamp.clone()));
-    metadata.set_tag(ExifTag::DateTimeOriginal(timestamp.clone()));
-    metadata.set_tag(ExifTag::CreateDate(timestamp));
-    metadata.set_tag(ExifTag::Software("Photo Scanner".to_string()));
-    metadata.set_tag(ExifTag::OffsetTime(offset.clone()));
-    metadata.set_tag(ExifTag::OffsetTimeOriginal(offset.clone()));
-    metadata.set_tag(ExifTag::OffsetTimeDigitized(offset));
-    if let Some(dpi) = dpi {
-        let resolution = vec![uR64 {
-            nominator: dpi,
-            denominator: 1,
-        }];
-        metadata.set_tag(ExifTag::XResolution(resolution.clone()));
-        metadata.set_tag(ExifTag::YResolution(resolution));
-        metadata.set_tag(ExifTag::ResolutionUnit(vec![2]));
-    }
-    metadata.write_to_file(path)?;
-    set_file_mtime(
-        path,
-        FileTime::from_unix_time(
-            captured_at.timestamp(),
-            captured_at.timestamp_subsec_nanos(),
-        ),
-    )?;
-    Ok(())
 }
 
 fn write_container_dpi(path: &Path, format: OutputFormat, dpi: u32) -> Result<(), SplitError> {
@@ -686,27 +981,58 @@ fn save_image(
         let _ = fs::remove_file(path);
         return Err(error);
     }
-    if let Err(error) = write_metadata(path, captured_at, metadata_dpi) {
+    if let Err(error) = crate::metadata::write_metadata(path, captured_at, metadata_dpi) {
         let _ = fs::remove_file(path);
-        return Err(error);
+        return Err(metadata_error(error));
     }
     Ok(())
 }
 
+fn output_tempfile(directory: &Path, suffix: &str) -> Result<NamedTempFile, std::io::Error> {
+    let mut builder = TempFileBuilder::new();
+    builder.prefix(".photoscanner-").suffix(suffix);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o666));
+    }
+    builder.tempfile_in(directory)
+}
+
+fn stage_image(
+    image: &Mat,
+    directory: &Path,
+    format: OutputFormat,
+    quality: i32,
+    dpi: Option<u32>,
+    captured_at: DateTime<Local>,
+) -> Result<TempPath, SplitError> {
+    let suffix = format!(".{}", format.extension());
+    let temporary = output_tempfile(directory, &suffix)?;
+    save_image(image, temporary.path(), format, quality, dpi, captured_at)?;
+    File::open(temporary.path())?.sync_all()?;
+    Ok(temporary.into_temp_path())
+}
+
 fn save_preview(
     image: &Mat,
-    photos: &[DetectedPhoto],
+    photos: &[PhotoRegion],
     path: &Path,
     captured_at: DateTime<Local>,
 ) -> Result<(), SplitError> {
-    let mut overlay = image.try_clone()?;
-    let font_scale = (image.rows().min(image.cols()) as f64 / 1400.0).clamp(0.7, 4.0);
+    let (mut overlay, scale) = scaled_for_detection(image, MAX_PREVIEW_SIZE)?;
+    let font_scale = (overlay.rows().min(overlay.cols()) as f64 / 1400.0).clamp(0.7, 4.0);
     let thickness = (font_scale * 2.0).round().max(2.0) as i32;
     for (index, photo) in photos.iter().enumerate() {
         let polygon: Vector<Point> = photo
             .source_box
             .iter()
-            .map(|point| Point::new(point.x.round() as i32, point.y.round() as i32))
+            .map(|point| {
+                Point::new(
+                    (point.x * scale).round() as i32,
+                    (point.y * scale).round() as i32,
+                )
+            })
             .collect();
         let mut polygons: Vector<Vector<Point>> = Vector::new();
         polygons.push(polygon.clone());
@@ -738,6 +1064,22 @@ fn save_preview(
     save_image(&overlay, path, OutputFormat::Jpeg, 88, None, captured_at)
 }
 
+fn stage_preview(
+    image: &Mat,
+    photos: &[PhotoRegion],
+    directory: &Path,
+    captured_at: DateTime<Local>,
+) -> Result<TempPath, SplitError> {
+    let temporary = output_tempfile(directory, ".jpg")?;
+    save_preview(image, photos, temporary.path(), captured_at)?;
+    File::open(temporary.path())?.sync_all()?;
+    Ok(temporary.into_temp_path())
+}
+
+/// Speichert die gesamte Scanfläche als eine neue, kollisionsfreie Datei.
+///
+/// `prefix` muss genau eine sichere Dateinamenskomponente enthalten. Ohne
+/// Präfix wird ein zeitbasierter Name erzeugt.
 pub fn save_full_scan(
     source: &Path,
     output_directory: &Path,
@@ -745,24 +1087,38 @@ pub fn save_full_scan(
     prefix: Option<&str>,
 ) -> Result<PathBuf, SplitError> {
     config.validate()?;
+    if let Some(prefix) = prefix {
+        validate_prefix(prefix)?;
+    }
     let (image, embedded_dpi) = read_image(source)?;
     fs::create_dir_all(output_directory)?;
     let captured_at = capture_datetime(config.capture_date)?;
     let base = prefix
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("scan_{}", captured_at.format("%Y%m%d_%H%M%S")));
-    let path = unique_path(output_directory, &base, config.output_format.extension());
-    save_image(
+    let temporary = stage_image(
         &image,
-        &path,
+        output_directory,
         config.output_format,
         config.jpeg_quality,
         config.dpi.or(embedded_dpi),
         captured_at,
     )?;
-    Ok(path)
+    let mut paths = publish_staged_group(
+        output_directory,
+        vec![StagedOutput {
+            temporary,
+            stem: base,
+            extension: config.output_format.extension(),
+        }],
+    )?;
+    Ok(paths.pop().expect("eine bereitgestellte Ausgabedatei"))
 }
 
+/// Erkennt alle Fotos und veröffentlicht sie gemeinsam ohne Überschreiben.
+///
+/// Bei einem Veröffentlichungsfehler wird die komplette Gruppe zurückgerollt.
+/// Optional wird eine größenbegrenzte Kontrollvorschau erzeugt.
 pub fn split_scan(
     source: &Path,
     output_directory: &Path,
@@ -771,9 +1127,12 @@ pub fn split_scan(
     create_preview: bool,
 ) -> Result<SplitResult, SplitError> {
     config.validate()?;
+    if let Some(prefix) = prefix {
+        validate_prefix(prefix)?;
+    }
     let (image, embedded_dpi) = read_image(source)?;
-    let (photos, threshold) = detect_photos(&image, config)?;
-    if photos.is_empty() {
+    let (regions, threshold) = detect_photo_regions(&image, config)?;
+    if regions.is_empty() {
         return Err(SplitError::NothingDetected);
     }
     fs::create_dir_all(output_directory)?;
@@ -782,32 +1141,43 @@ pub fn split_scan(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("scan_{}", captured_at.format("%Y%m%d_%H%M%S")));
     let dpi = config.dpi.or(embedded_dpi);
-    let mut files = Vec::with_capacity(photos.len());
-    for (index, photo) in photos.iter().enumerate() {
-        let path = unique_path(
+    let mut staged = Vec::with_capacity(regions.len() + usize::from(create_preview));
+    let mut exported_regions = Vec::with_capacity(regions.len());
+    for region in regions {
+        let photo = warp_photo(&image, region.source_box)?;
+        if photo.rows().min(photo.cols()) < 10 {
+            continue;
+        }
+        let temporary = stage_image(
+            &photo,
             output_directory,
-            &format!("{base}_{:02}", index + 1),
-            config.output_format.extension(),
-        );
-        save_image(
-            &photo.image,
-            &path,
             config.output_format,
             config.jpeg_quality,
             dpi,
             captured_at,
         )?;
-        files.push(path);
+        let index = staged.len() + 1;
+        staged.push(StagedOutput {
+            temporary,
+            stem: format!("{base}_{index:02}"),
+            extension: config.output_format.extension(),
+        });
+        exported_regions.push(region);
     }
-    let preview = if create_preview {
-        let path = unique_path(output_directory, &format!("{base}_vorschau"), "jpg");
-        save_preview(&image, &photos, &path, captured_at)?;
-        Some(path)
-    } else {
-        None
-    };
+    if staged.is_empty() {
+        return Err(SplitError::NothingDetected);
+    }
+    if create_preview {
+        staged.push(StagedOutput {
+            temporary: stage_preview(&image, &exported_regions, output_directory, captured_at)?,
+            stem: format!("{base}_vorschau"),
+            extension: "jpg",
+        });
+    }
+    let mut published = publish_staged_group(output_directory, staged)?;
+    let preview = create_preview.then(|| published.pop().expect("bereitgestellte Vorschau"));
     Ok(SplitResult {
-        files,
+        files: published,
         preview,
         threshold_used: threshold,
     })
@@ -816,6 +1186,9 @@ pub fn split_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     fn synthetic_scan() -> Mat {
@@ -871,6 +1244,21 @@ mod tests {
             .unwrap();
     }
 
+    fn staged_text(directory: &Path, stem: &str, contents: &str) -> StagedOutput {
+        let mut temporary = TempFileBuilder::new()
+            .prefix(".photoscanner-test-")
+            .suffix(".txt")
+            .tempfile_in(directory)
+            .unwrap();
+        temporary.write_all(contents.as_bytes()).unwrap();
+        temporary.as_file().sync_all().unwrap();
+        StagedOutput {
+            temporary: temporary.into_temp_path(),
+            stem: stem.to_string(),
+            extension: "txt",
+        }
+    }
+
     #[test]
     fn detects_and_deskews_three_photos() {
         let (photos, threshold) =
@@ -882,6 +1270,24 @@ mod tests {
             assert!(photo.image.cols() > 300);
             assert!(photo.image.rows() > 200);
         }
+    }
+
+    #[test]
+    fn preserves_portrait_orientation_when_deskewing() {
+        let image = plain_scan(500, 800);
+        let portrait = warp_photo(
+            &image,
+            [
+                Point2f::new(110.0, 90.0),
+                Point2f::new(330.0, 90.0),
+                Point2f::new(330.0, 710.0),
+                Point2f::new(110.0, 710.0),
+            ],
+        )
+        .unwrap();
+        assert!(portrait.rows() > portrait.cols());
+        assert_eq!(portrait.rows(), 620);
+        assert_eq!(portrait.cols(), 220);
     }
 
     #[test]
@@ -908,13 +1314,11 @@ mod tests {
             assert!(result.preview.as_ref().is_some_and(|path| path.is_file()));
             for path in result.files {
                 assert!(path.is_file());
-                let metadata = Metadata::new_from_path(&path).unwrap();
-                assert!(metadata.get_tag_by_hex(0x9003, None).any(|tag| {
-                    matches!(tag, ExifTag::DateTimeOriginal(value) if value.starts_with("1995:09:01"))
-                }));
-                assert!(metadata.get_tag_by_hex(0x011a, None).any(|tag| {
-                    matches!(tag, ExifTag::XResolution(values) if values.first().is_some_and(|value| value.nominator == 600))
-                }));
+                let captured = crate::metadata::read_tag(&path, "Exif.Photo.DateTimeOriginal")
+                    .unwrap()
+                    .unwrap();
+                assert!(captured.starts_with("1995:09:01"));
+                assert_eq!(crate::metadata::image_dpi(&path).unwrap(), Some(600));
                 if format != OutputFormat::Tiff {
                     assert_eq!(container_dpi(&path), Some(600));
                 }
@@ -955,6 +1359,13 @@ mod tests {
         let second = split_scan(&source, &output, &config, Some("foto"), false).unwrap();
         let names: std::collections::HashSet<_> = first.files.iter().chain(&second.files).collect();
         assert_eq!(names.len(), 6);
+        assert!(
+            second.files.iter().all(|path| path
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("_2"))
+        );
 
         let full = save_full_scan(&source, &output, &config, Some("vollscan")).unwrap();
         let restored = imgcodecs::imread(&full, imgcodecs::IMREAD_COLOR).unwrap();
@@ -966,7 +1377,7 @@ mod tests {
             ..config
         };
         let tiff = save_full_scan(&source, &output, &tiff_config, Some("vollscan-tiff")).unwrap();
-        assert_eq!(image_dpi(&tiff), Some(72));
+        assert_eq!(image_dpi(&tiff).unwrap(), Some(72));
     }
 
     #[test]
@@ -976,5 +1387,181 @@ mod tests {
             ..SplitConfig::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_unsafe_prefixes_before_touching_the_output_directory() {
+        let root = TempDir::new().unwrap();
+        let missing_source = root.path().join("missing.png");
+        let output = root.path().join("out");
+        let absolute = root.path().join("absolute").to_string_lossy().into_owned();
+        let too_long = "a".repeat(MAX_PREFIX_BYTES + 1);
+        for prefix in [
+            "",
+            ".",
+            "..",
+            "../escaped",
+            "unterordner/foto",
+            "windows\\foto",
+            "zeile\numbruch",
+            &absolute,
+            &too_long,
+        ] {
+            assert!(matches!(
+                save_full_scan(
+                    &missing_source,
+                    &output,
+                    &SplitConfig::default(),
+                    Some(prefix)
+                ),
+                Err(SplitError::InvalidConfig(_))
+            ));
+        }
+        assert!(!output.exists());
+        assert!(!root.path().join("escaped.jpg").exists());
+    }
+
+    #[test]
+    fn validates_detection_and_import_resource_limits() {
+        assert!(validate_image_dimensions(10_200, 14_040).is_ok());
+        assert!(validate_image_dimensions(20_000, 20_000).is_err());
+
+        for maximum in [MIN_DETECTION_SIZE - 1, MAX_DETECTION_SIZE + 1] {
+            let config = SplitConfig {
+                max_detection_size: maximum,
+                ..SplitConfig::default()
+            };
+            assert!(config.validate().is_err());
+        }
+        assert!(SplitConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_oversized_png_before_decoding_it() {
+        let root = TempDir::new().unwrap();
+        let source = root.path().join("oversized.png");
+        let mut header = Vec::from(&b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"[..]);
+        header.extend_from_slice(&20_000u32.to_be_bytes());
+        header.extend_from_slice(&20_000u32.to_be_bytes());
+        File::create(&source).unwrap().write_all(&header).unwrap();
+
+        let error = save_full_scan(
+            &source,
+            &root.path().join("out"),
+            &SplitConfig::default(),
+            Some("gross"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, SplitError::InvalidConfig(message) if message.contains("zu groß")));
+    }
+
+    #[test]
+    fn reads_dimensions_of_all_supported_input_formats() {
+        let root = TempDir::new().unwrap();
+        let image = plain_scan(80, 60);
+        for extension in ["jpg", "png", "tif"] {
+            let path = root.path().join(format!("bild.{extension}"));
+            imgcodecs::imwrite_def(&path, &image).unwrap();
+            assert_eq!(image_dimensions(&path).unwrap(), (80, 60));
+        }
+    }
+
+    #[test]
+    fn preview_is_bounded_instead_of_cloning_the_full_scan() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("preview.jpg");
+        save_preview(&plain_scan(3000, 2400), &[], &path, Local::now()).unwrap();
+        let preview = imgcodecs::imread(&path, imgcodecs::IMREAD_COLOR).unwrap();
+        assert_eq!(preview.cols(), MAX_PREVIEW_SIZE);
+        assert_eq!(preview.rows(), 1600);
+    }
+
+    #[test]
+    fn failed_group_commit_rolls_back_already_published_files() {
+        let root = TempDir::new().unwrap();
+        let staged = vec![
+            staged_text(root.path(), "erstes", "eins"),
+            staged_text(root.path(), "zweites", "zwei"),
+        ];
+        let first = root.path().join("erstes.txt");
+        let destinations = vec![first.clone(), root.path().join("fehlt/zweites.txt")];
+        assert!(commit_staged(&staged, &destinations).is_err());
+        assert!(!first.exists());
+        assert!(staged.iter().all(|output| output.temporary.is_file()));
+    }
+
+    #[test]
+    #[ignore = "interner Worker für den Mehrprozess-Regressions-Test"]
+    fn atomic_publish_process_worker() {
+        let Some(directory) = std::env::var_os("PHOTOSCANNER_TEST_OUTPUT") else {
+            return;
+        };
+        let id = std::env::var("PHOTOSCANNER_TEST_ID").unwrap();
+        let directory = PathBuf::from(directory);
+        let staged = staged_text(&directory, "parallel", &id);
+        File::create(directory.join(format!("ready-{id}"))).unwrap();
+        let started = Instant::now();
+        while !directory.join("start").exists() {
+            assert!(started.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        publish_staged_group(&directory, vec![staged]).unwrap();
+    }
+
+    #[test]
+    fn parallel_processes_never_clobber_an_existing_export() {
+        const PROCESS_COUNT: usize = 8;
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("parallel.txt"), "vorhanden").unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let mut children = Vec::new();
+        for id in 0..PROCESS_COUNT {
+            children.push(
+                Command::new(&executable)
+                    .args([
+                        "--exact",
+                        "splitter::tests::atomic_publish_process_worker",
+                        "--ignored",
+                    ])
+                    .env("PHOTOSCANNER_TEST_OUTPUT", root.path())
+                    .env("PHOTOSCANNER_TEST_ID", id.to_string())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+        }
+        let started = Instant::now();
+        while (0..PROCESS_COUNT)
+            .filter(|id| root.path().join(format!("ready-{id}")).exists())
+            .count()
+            != PROCESS_COUNT
+        {
+            assert!(started.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        File::create(root.path().join("start")).unwrap();
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+
+        assert_eq!(
+            fs::read_to_string(root.path().join("parallel.txt")).unwrap(),
+            "vorhanden"
+        );
+        let exports: Vec<_> = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|value| value == "txt"))
+            .collect();
+        assert_eq!(exports.len(), PROCESS_COUNT + 1);
+        let contents: HashSet<_> = exports
+            .iter()
+            .map(|path| fs::read_to_string(path).unwrap())
+            .collect();
+        assert!(contents.contains("vorhanden"));
+        for id in 0..PROCESS_COUNT {
+            assert!(contents.contains(&id.to_string()));
+        }
     }
 }

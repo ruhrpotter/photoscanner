@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel rust clang pkgconf gtk4 libadwaita opencv sane exiv2
+          desktop-file-utils appstream cargo-audit
+      - name: Quality checks
+        run: make check
+      - name: Dependency audit
+        run: make audit

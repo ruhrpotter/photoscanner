@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.martin.PhotoScanner</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Photo Scanner</name>
+  <summary>Papierfotos scannen, erkennen und einzeln archivieren</summary>
+  <description>
+    <p>
+      Photo Scanner digitalisiert Papierfotos über SANE, erkennt mehrere
+      aufgelegte Fotos und speichert sie einzeln mit Aufnahmedatum und
+      Auflösungsmetadaten.
+    </p>
+    <p>
+      Vorhandene PNG-, JPEG- und TIFF-Scans können ebenfalls importiert werden.
+      Alternativ lässt sich die vollständige Scanfläche unverändert exportieren.
+    </p>
+  </description>
+  <launchable type="desktop-id">de.martin.PhotoScanner.desktop</launchable>
+  <provides>
+    <binary>photoscanner</binary>
+  </provides>
+  <developer id="de.martin">
+    <name>Photo Scanner contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-08-06">
+      <description>
+        <p>Native GTK4-Oberfläche mit automatischer Fotoerkennung und Metadatenexport.</p>
+      </description>
+    </release>
+  </releases>
+</component>
