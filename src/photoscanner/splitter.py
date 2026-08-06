@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Iterable
 
 import cv2
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import ExifTags, Image, ImageOps
 
 
 class SplitError(RuntimeError):
@@ -241,6 +242,7 @@ def _save_photo(
     *,
     quality: int,
     dpi: tuple[float, float] | None,
+    captured_at: datetime,
 ) -> None:
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     output = Image.fromarray(rgb)
@@ -252,13 +254,45 @@ def _save_photo(
         options["compression"] = "tiff_lzw"
     if dpi:
         options["dpi"] = dpi
+    options["exif"] = _capture_exif(captured_at)
     try:
         output.save(path, **options)
+        _set_file_time(path, captured_at)
     except OSError as exc:
         raise SplitError(f"Foto konnte nicht gespeichert werden: {path}: {exc}") from exc
 
 
-def _save_preview(image: np.ndarray, photos: Iterable[DetectedPhoto], path: Path) -> None:
+def _capture_exif(captured_at: datetime) -> Image.Exif:
+    """Erzeugt die von PhotoPrism bevorzugten lokalen Aufnahmezeit-Felder."""
+    timestamp = captured_at.strftime("%Y:%m:%d %H:%M:%S")
+    offset = captured_at.strftime("%z")
+    if offset:
+        offset = f"{offset[:3]}:{offset[3:]}"
+
+    exif = Image.Exif()
+    exif[ExifTags.Base.DateTime] = timestamp
+    exif[ExifTags.Base.DateTimeOriginal] = timestamp
+    exif[ExifTags.Base.DateTimeDigitized] = timestamp
+    exif[ExifTags.Base.Software] = "Photo Scanner"
+    if offset:
+        exif[ExifTags.Base.OffsetTime] = offset
+        exif[ExifTags.Base.OffsetTimeOriginal] = offset
+        exif[ExifTags.Base.OffsetTimeDigitized] = offset
+    return exif
+
+
+def _set_file_time(path: Path, captured_at: datetime) -> None:
+    timestamp = captured_at.timestamp()
+    os.utime(path, (timestamp, timestamp))
+
+
+def _save_preview(
+    image: np.ndarray,
+    photos: Iterable[DetectedPhoto],
+    path: Path,
+    *,
+    captured_at: datetime,
+) -> None:
     overlay = image.copy()
     font_scale = max(0.7, min(image.shape[:2]) / 1400)
     thickness = max(2, round(font_scale * 2))
@@ -277,7 +311,13 @@ def _save_preview(image: np.ndarray, photos: Iterable[DetectedPhoto], path: Path
             cv2.LINE_AA,
         )
     rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-    Image.fromarray(rgb).save(path, quality=88, optimize=True)
+    Image.fromarray(rgb).save(
+        path,
+        quality=88,
+        optimize=True,
+        exif=_capture_exif(captured_at),
+    )
+    _set_file_time(path, captured_at)
 
 
 def split_scan(
@@ -306,7 +346,8 @@ def split_scan(
     output_directory.mkdir(parents=True, exist_ok=True)
     normalized_format = config.output_format.lower().replace("jpeg", "jpg").replace("tiff", "tif")
     suffix = f".{normalized_format}"
-    base = prefix or f"scan_{datetime.now():%Y%m%d_%H%M%S}"
+    captured_at = datetime.now().astimezone()
+    base = prefix or f"scan_{captured_at:%Y%m%d_%H%M%S}"
     effective_dpi = (
         (float(config.dpi), float(config.dpi)) if config.dpi is not None else embedded_dpi
     )
@@ -319,11 +360,12 @@ def split_scan(
             path,
             quality=config.jpeg_quality,
             dpi=effective_dpi,
+            captured_at=captured_at,
         )
         files.append(path)
 
     preview_path: Path | None = None
     if save_preview:
         preview_path = _unique_path(output_directory, f"{base}_vorschau", ".jpg")
-        _save_preview(image, photos, preview_path)
+        _save_preview(image, photos, preview_path, captured_at=captured_at)
     return SplitResult(tuple(files), preview_path, threshold)

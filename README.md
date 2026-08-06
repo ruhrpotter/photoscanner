@@ -85,6 +85,12 @@ Vorhandene Dateien werden nie überschrieben. JPG (Qualität 95), PNG und
 verlustfrei komprimiertes TIFF werden unterstützt. Beim direkten Scannen wird
 die eingestellte dpi-Zahl in die Einzelfotos übernommen.
 
+Alle erzeugten Fotos und die Vorschau erhalten standardmäßig den aktuellen
+lokalen Zeitpunkt als EXIF `DateTimeOriginal`, `DateTimeDigitized` und
+`DateTime`. Der Dateiname und der Datei-Zeitstempel verwenden denselben
+Zeitpunkt. Dadurch erkennt PhotoPrism die Bilder zuverlässig mit dem Datum des
+Scan-Tages.
+
 ## Tests
 
 ```bash

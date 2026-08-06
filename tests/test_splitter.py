@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import ExifTags, Image, ImageDraw
 
 from photoscanner.splitter import SplitConfig, SplitError, detect_photos, split_scan
 
@@ -79,6 +80,32 @@ class SplitterTests(unittest.TestCase):
                 with Image.open(path) as image:
                     self.assertGreater(image.width, image.height)
                     self.assertAlmostEqual(600, image.info["dpi"][0], delta=1)
+
+    def test_exports_current_photoprism_date_metadata(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "scan.png"
+            synthetic_scan().save(source)
+            today = datetime.now().astimezone().strftime("%Y:%m:%d")
+
+            for output_format in ("jpg", "png", "tif"):
+                result = split_scan(
+                    source,
+                    root / output_format,
+                    SplitConfig(output_format=output_format),
+                    prefix="archiv",
+                )
+                paths = (*result.files, result.preview)
+                for path in paths:
+                    self.assertIsNotNone(path)
+                    with Image.open(path) as image:
+                        exif = image.getexif()
+                        self.assertTrue(exif[ExifTags.Base.DateTimeOriginal].startswith(today))
+                        self.assertTrue(exif[ExifTags.Base.DateTimeDigitized].startswith(today))
+                        self.assertTrue(exif[ExifTags.Base.DateTime].startswith(today))
+                        self.assertEqual("Photo Scanner", exif[ExifTags.Base.Software])
+                    modified = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+                    self.assertEqual(datetime.now().astimezone().date(), modified.date())
 
     def test_scanner_edge_does_not_join_adjacent_photos(self) -> None:
         rgb = np.asarray(edge_touching_scan())
