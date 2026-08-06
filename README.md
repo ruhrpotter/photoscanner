@@ -35,6 +35,10 @@ gespeichert. Vor jedem Scan fragt die TUI nach dem Aufnahmedatum. Enter übernim
 das heutige Datum; historische Fotos können zum Beispiel mit `01.09.1995`
 versehen werden.
 
+Der einmal ausgewählte Scanner bleibt für die laufende TUI-Sitzung gespeichert.
+Weitere Scans starten deshalb ohne erneute, langsame SANE-Gerätesuche. Menüpunkt
+`3` aktualisiert die Geräteliste weiterhin bewusst.
+
 Für gute Ergebnisse:
 
 - Scannerauflösung 600 dpi für normale Papierfotos

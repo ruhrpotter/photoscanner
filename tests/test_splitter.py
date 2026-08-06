@@ -48,6 +48,15 @@ def edge_touching_scan() -> Image.Image:
     return canvas
 
 
+def closely_spaced_scan() -> Image.Image:
+    canvas = Image.new("RGB", (1200, 700), (246, 246, 242))
+    first = make_photo((480, 350), (55, 110, 165))
+    second = make_photo((480, 350), (115, 55, 120))
+    canvas.paste(first, (90, 175))
+    canvas.paste(second, (580, 175))  # nur 10 Pixel Abstand
+    return canvas
+
+
 class SplitterTests(unittest.TestCase):
     def test_detects_and_deskews_three_photos(self) -> None:
         rgb = np.asarray(synthetic_scan())
@@ -133,6 +142,12 @@ class SplitterTests(unittest.TestCase):
 
     def test_scanner_edge_does_not_join_adjacent_photos(self) -> None:
         rgb = np.asarray(edge_touching_scan())
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        photos, _ = detect_photos(bgr, SplitConfig(min_area_percent=2.0))
+        self.assertEqual(2, len(photos))
+
+    def test_keeps_closely_spaced_photos_separate(self) -> None:
+        rgb = np.asarray(closely_spaced_scan())
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         photos, _ = detect_photos(bgr, SplitConfig(min_area_percent=2.0))
         self.assertEqual(2, len(photos))

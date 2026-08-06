@@ -47,6 +47,7 @@ class PhotoScannerTui:
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console()
         self.settings = TuiSettings()
+        self._remembered_device: ScannerDevice | None = None
 
     def run(self) -> int:
         self.console.print(
@@ -97,13 +98,23 @@ class PhotoScannerTui:
             raise ScannerError("Ungültige Scanner-Auswahl.")
         return devices[selected - 1]
 
-    def _scan_and_split(self) -> None:
+    def _device_for_scan(self) -> ScannerDevice:
+        if self._remembered_device is not None:
+            self.console.print(
+                f"Scanner: [cyan]{self._remembered_device.label}[/cyan] [dim](gemerkt)[/dim]"
+            )
+            return self._remembered_device
+
         devices = list_devices()
         if not devices:
             raise ScannerError(
                 "SANE hat keinen Scanner gefunden. Prüfe USB/Netzwerk und teste 'scanimage -L'."
             )
-        device = self._choose_device(devices)
+        self._remembered_device = self._choose_device(devices)
+        return self._remembered_device
+
+    def _scan_and_split(self) -> None:
+        device = self._device_for_scan()
         self.console.print(
             "\nLege die Fotos mit [bold]mindestens 1 cm Abstand[/bold] auf das Scanbett."
         )
@@ -112,12 +123,18 @@ class PhotoScannerTui:
             return
         with TemporaryDirectory(prefix="photoscanner-") as temporary:
             scan_path = Path(temporary) / "scan.png"
-            with self.console.status(f"Scanne mit {self.settings.dpi} dpi ..."):
-                scan_to_file(
-                    scan_path,
-                    device=device.name,
-                    dpi=self.settings.dpi,
-                )
+            try:
+                with self.console.status(f"Scanne mit {self.settings.dpi} dpi ..."):
+                    scan_to_file(
+                        scan_path,
+                        device=device.name,
+                        dpi=self.settings.dpi,
+                    )
+            except ScannerError:
+                # Nach einem Verbindungsfehler wird beim nächsten Versuch neu
+                # gesucht, statt ein nicht mehr erreichbares Gerät festzuhalten.
+                self._remembered_device = None
+                raise
             with self.console.status("Erkenne und begradige Fotos ..."):
                 result = split_scan(
                     scan_path,
@@ -167,7 +184,14 @@ class PhotoScannerTui:
         devices = list_devices()
         if not devices:
             self.console.print("[yellow]Kein Scanner erkannt.[/yellow]")
+            self._remembered_device = None
             return
+        if self._remembered_device is not None:
+            matching = next(
+                (device for device in devices if device.name == self._remembered_device.name),
+                None,
+            )
+            self._remembered_device = matching
         table = Table("Gerät", "Hersteller", "Modell", "Typ")
         for device in devices:
             table.add_row(device.name, device.vendor, device.model, device.kind)

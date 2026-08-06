@@ -117,13 +117,15 @@ def _foreground_mask(
 
     mask = (distance >= threshold).astype(np.uint8) * 255
     short_side = min(image.shape[:2])
-    close_size = max(3, round(short_side * 0.012))
+    # Kleine Lücken innerhalb eines Fotos schließen, ohne eng nebeneinander
+    # liegende Papierfotos über ihren schmalen weißen Zwischenraum zu verbinden.
+    close_size = max(3, round(short_side * 0.004))
     close_size += 1 - close_size % 2
     open_size = max(3, round(short_side * 0.0025))
     open_size += 1 - open_size % 2
     close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_size, close_size))
     open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_size, open_size))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
 
     # Ein dunkler Rand der Scannerfläche darf Fotos, die links oder oben am
