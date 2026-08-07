@@ -17,7 +17,8 @@ use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
 use photoscanner::scanner::{
-    ScannerCancellation, ScannerDevice, list_devices_cancellable, scan_to_file_cancellable,
+    DEVICE_DISCOVERY_TIMEOUT, ScannerCancellation, ScannerDevice, list_devices_cancellable,
+    scan_to_file_cancellable,
 };
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use photoscanner::{APP_ID, APP_NAME};
@@ -1011,7 +1012,7 @@ fn request_devices(ui: &Ui) {
     let sender = ui.sender.clone();
     thread::spawn(move || {
         let result = run_worker(|| {
-            list_devices_cancellable(Duration::from_secs(15), &cancellation).map_err(|error| {
+            list_devices_cancellable(DEVICE_DISCOVERY_TIMEOUT, &cancellation).map_err(|error| {
                 if cancellation.is_cancelled() {
                     CANCELLED_MESSAGE.to_string()
                 } else {

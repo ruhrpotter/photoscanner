@@ -13,6 +13,13 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use wait_timeout::ChildExt;
 
+/// Maximale Wartezeit für die vollständige SANE-Gerätesuche.
+///
+/// Einige Netzwerk-Backends warten auf ihre jeweilige Discovery-Frist. Auf
+/// Systemen mit der SANE-Standardkonfiguration kann die Gesamtabfrage deshalb
+/// deutlich länger als 15 Sekunden dauern, obwohl der Scanner erreichbar ist.
+pub const DEVICE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone, Debug)]
 struct ScannerProgram {
     executable: OsString,
@@ -567,6 +574,11 @@ mod tests {
             device.label(),
             "eSCL Brother MFC-L2960DW (airscan:e0:Brother MFC-L2960DW)"
         );
+    }
+
+    #[test]
+    fn default_device_discovery_timeout_allows_slow_network_backends() {
+        assert_eq!(DEVICE_DISCOVERY_TIMEOUT, Duration::from_secs(30));
     }
 
     #[cfg(unix)]

@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use photoscanner::scanner::{list_devices, scan_to_file};
+use photoscanner::scanner::{DEVICE_DISCOVERY_TIMEOUT, list_devices, scan_to_file};
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use tempfile::TempDir;
 
@@ -125,7 +125,7 @@ fn scanner_name(options: &ScannerOptions) -> Result<String> {
     if let Some(device) = &options.device {
         return Ok(device.clone());
     }
-    let devices = list_devices(Duration::from_secs(15))?;
+    let devices = list_devices(DEVICE_DISCOVERY_TIMEOUT)?;
     let Some(device) = devices.first() else {
         bail!("SANE hat keinen Scanner gefunden.");
     };
@@ -146,7 +146,7 @@ pub fn run(command: Command) -> Result<()> {
     match command {
         Command::Gui => unreachable!("GUI wird in main behandelt"),
         Command::Devices => {
-            let devices = list_devices(Duration::from_secs(15))?;
+            let devices = list_devices(DEVICE_DISCOVERY_TIMEOUT)?;
             if devices.is_empty() {
                 bail!("Kein Scanner erkannt.");
             }
