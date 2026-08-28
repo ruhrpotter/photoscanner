@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photoscanner 0.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 06:21+0000\n"
+"POT-Creation-Date: 2026-08-28 06:31+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -480,10 +480,6 @@ msgstr ""
 
 #: src/gui.rs:2443
 msgid "Review photo contains no image data: {path}"
-msgstr ""
-
-#: src/gui.rs:2466
-msgid "No photo selected for saving"
 msgstr ""
 
 #: src/gui.rs:2586

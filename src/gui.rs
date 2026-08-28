@@ -173,7 +173,7 @@ struct ReviewGroup {
 }
 
 struct ReviewData {
-    _staging: TempDir,
+    staging: TempDir,
     photos: Vec<ReviewPhotoData>,
     groups: Vec<ReviewGroup>,
     overview: PathBuf,
@@ -1811,9 +1811,9 @@ fn prepare_review(
             &[("errors", failures.join("\n"))],
         ));
     }
-    let overview = compose_review_overviews(&overviews, staging.path())?;
+    let overview = compose_image_sheet(&overviews, staging.path())?;
     Ok(ReviewData {
-        _staging: staging,
+        staging,
         photos,
         groups,
         overview,
@@ -1823,19 +1823,19 @@ fn prepare_review(
     })
 }
 
-fn compose_review_overviews(overviews: &[PathBuf], directory: &Path) -> Result<PathBuf> {
+fn compose_image_sheet(images: &[PathBuf], directory: &Path) -> Result<PathBuf> {
     const WIDTH: i32 = 1200;
     const HEIGHT: i32 = 900;
     const CELL_PADDING: i32 = 16;
 
-    match overviews {
+    match images {
         [] => bail!(tr("No preview file was created")),
-        [overview] => return Ok(overview.clone()),
+        [image] => return Ok(image.clone()),
         _ => {}
     }
 
-    let columns = (overviews.len() as f64).sqrt().ceil() as i32;
-    let rows = overviews.len().div_ceil(columns as usize) as i32;
+    let columns = (images.len() as f64).sqrt().ceil() as i32;
+    let rows = images.len().div_ceil(columns as usize) as i32;
     let cell_width = WIDTH / columns;
     let cell_height = HEIGHT / rows;
     let mut sheet = Mat::new_rows_cols_with_default(
@@ -1845,7 +1845,7 @@ fn compose_review_overviews(overviews: &[PathBuf], directory: &Path) -> Result<P
         core::Scalar::new(24.0, 24.0, 24.0, 0.0),
     )?;
 
-    for (index, path) in overviews.iter().enumerate() {
+    for (index, path) in images.iter().enumerate() {
         let image = imgcodecs::imread(path, imgcodecs::IMREAD_COLOR).with_context(|| {
             tr_args(
                 "Could not read preview: {path}",
@@ -2428,7 +2428,7 @@ fn save_review_work(
     cancellation: &ScannerCancellation,
 ) -> Result<WorkResult> {
     let mut file_count = 0usize;
-    let mut last_preview = None;
+    let mut saved_files = Vec::new();
     for (group_index, group) in review.groups.iter().enumerate() {
         ensure_not_cancelled(cancellation)?;
         let mut photos = Vec::new();
@@ -2460,10 +2460,10 @@ fn save_review_work(
             Some(&regions),
         )?;
         file_count += result.files.len();
-        last_preview = result.preview.or_else(|| result.files.first().cloned());
+        saved_files.extend(result.files);
     }
     ensure_not_cancelled(cancellation)?;
-    let preview_source = last_preview.ok_or_else(|| anyhow!(tr("No photo selected for saving")))?;
+    let preview_source = compose_image_sheet(&saved_files, review.staging.path())?;
     let (preview, preview_directory) = bounded_preview(&preview_source)?;
     let mut detail = review.output.display().to_string();
     if !review.failures.is_empty() {
@@ -2818,6 +2818,64 @@ mod tests {
     }
 
     #[test]
+    fn saved_review_preview_uses_the_exported_photo() {
+        let output = TempDir::new().unwrap();
+        let staging = TempDir::new().unwrap();
+        let photo_path = staging.path().join("photo.png");
+        let photo =
+            Mat::new_rows_cols_with_default(80, 120, CV_8UC3, Scalar::new(0.0, 0.0, 255.0, 0.0))
+                .unwrap();
+        assert!(imgcodecs::imwrite_def(&photo_path, &photo).unwrap());
+
+        let source =
+            Mat::new_rows_cols_with_default(160, 200, CV_8UC3, Scalar::new(80.0, 80.0, 80.0, 0.0))
+                .unwrap();
+        let region = DetectedRegion {
+            center: core::Point2f::new(100.0, 80.0),
+            source_box: [
+                core::Point2f::new(20.0, 20.0),
+                core::Point2f::new(180.0, 20.0),
+                core::Point2f::new(180.0, 140.0),
+                core::Point2f::new(20.0, 140.0),
+            ],
+            area_percent: 60.0,
+        };
+        let review = ReviewData {
+            staging,
+            photos: vec![ReviewPhotoData {
+                full_path: photo_path.clone(),
+                thumbnail_path: photo_path,
+                group_index: 0,
+                region: region.clone(),
+            }],
+            groups: vec![ReviewGroup {
+                analyzed: AnalyzedScan {
+                    image: source,
+                    regions: vec![region],
+                    threshold: 12.0,
+                    embedded_dpi: None,
+                },
+            }],
+            overview: PathBuf::new(),
+            config: SplitConfig {
+                output_format: OutputFormat::Png,
+                capture_date: NaiveDate::from_ymd_opt(1995, 9, 1),
+                ..SplitConfig::default()
+            },
+            output: output.path().join("saved"),
+            failures: Vec::new(),
+        };
+
+        let result = save_review_work(review, &[(true, 0)], &ScannerCancellation::new()).unwrap();
+        let preview = imgcodecs::imread(&result.preview, imgcodecs::IMREAD_COLOR).unwrap();
+        let center = preview
+            .at_2d::<core::Vec3b>(preview.rows() / 2, preview.cols() / 2)
+            .unwrap();
+
+        assert!(center[2] > 220 && center[1] < 30 && center[0] < 30);
+    }
+
+    #[test]
     fn review_overview_contains_every_source() {
         let directory = TempDir::new().unwrap();
         let red_path = directory.path().join("red.png");
@@ -2831,7 +2889,7 @@ mod tests {
         assert!(imgcodecs::imwrite_def(&red_path, &red).unwrap());
         assert!(imgcodecs::imwrite_def(&green_path, &green).unwrap());
 
-        let overview = compose_review_overviews(&[red_path, green_path], directory.path()).unwrap();
+        let overview = compose_image_sheet(&[red_path, green_path], directory.path()).unwrap();
         let image = imgcodecs::imread(&overview, imgcodecs::IMREAD_COLOR).unwrap();
         let left = image.at_2d::<core::Vec3b>(450, 300).unwrap();
         let right = image.at_2d::<core::Vec3b>(450, 900).unwrap();

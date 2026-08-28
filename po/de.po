@@ -350,9 +350,6 @@ msgstr "Speichere {count} Fotos …"
 msgid "Review photo contains no image data: {path}"
 msgstr "Prüffoto enthält keine Bilddaten: {path}"
 
-msgid "No photo selected for saving"
-msgstr "Kein Foto zum Speichern ausgewählt"
-
 msgid "Could not save settings: {error}"
 msgstr "Einstellungen konnten nicht gespeichert werden: {error}"
 
