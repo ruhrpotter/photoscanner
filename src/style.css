@@ -111,9 +111,23 @@
   opacity: 0.8;
 }
 
-.status-card {
+.action-bar {
+  padding: 10px 14px;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color));
+  box-shadow: 0 -4px 18px rgb(0 0 0 / 8%);
+}
+
+.action-bar-status {
+  min-height: 46px;
+  padding-left: 12px;
+  padding-right: 12px;
   border-radius: 14px;
   background: color-mix(in srgb, var(--card-bg-color) 88%, var(--accent-bg-color));
+}
+
+.action-bar-actions button {
+  min-width: 150px;
 }
 
 .primary-action {

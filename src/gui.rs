@@ -441,22 +441,34 @@ fn build_window(application: &adw::Application) {
         gtk::accessible::Property::KeyShortcuts("Control+R"),
     ]);
 
-    let scan_button = gtk::Button::builder()
+    let scan_button_content = adw::ButtonContent::builder()
         .label(tr("Start scan"))
         .icon_name("document-send-symbolic")
+        .can_shrink(true)
+        .build();
+    let scan_button = gtk::Button::builder()
+        .child(&scan_button_content)
         .hexpand(true)
         .build();
     scan_button.add_css_class("suggested-action");
     scan_button.add_css_class("primary-action");
-    let import_button = gtk::Button::builder()
+    let import_button_content = adw::ButtonContent::builder()
         .label(tr("Open scan file"))
         .icon_name("folder-open-symbolic")
+        .can_shrink(true)
+        .build();
+    let import_button = gtk::Button::builder()
+        .child(&import_button_content)
         .hexpand(true)
         .build();
     import_button.add_css_class("primary-action");
-    let cancel_button = gtk::Button::builder()
+    let cancel_button_content = adw::ButtonContent::builder()
         .label(tr("Cancel"))
         .icon_name("process-stop-symbolic")
+        .can_shrink(true)
+        .build();
+    let cancel_button = gtk::Button::builder()
+        .child(&cancel_button_content)
         .hexpand(true)
         .visible(false)
         .build();
@@ -580,7 +592,11 @@ fn build_window(application: &adw::Application) {
 
     split_view.set_sidebar(Some(&build_sidebar(&ui)));
     split_view.set_content(Some(&build_preview_pane(&ui)));
-    ui.toast_overlay.set_child(Some(&split_view));
+    split_view.set_vexpand(true);
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    root.append(&split_view);
+    root.append(&build_action_bar(&ui));
+    ui.toast_overlay.set_child(Some(&root));
     window.set_content(Some(&ui.toast_overlay));
 
     if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 860sp") {
@@ -711,24 +727,6 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     ));
     content.append(&detection_group);
 
-    let actions = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    actions.append(&ui.scan_button);
-    actions.append(&ui.import_button);
-    actions.append(&ui.cancel_button);
-    content.append(&actions);
-
-    let status = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    status.set_margin_top(4);
-    status.set_margin_bottom(4);
-    status.set_margin_start(12);
-    status.set_margin_end(12);
-    status.set_valign(gtk::Align::Center);
-    status.add_css_class("status-card");
-    status.append(&ui.spinner);
-    status.append(&ui.status_label);
-    status.append(&ui.progress_bar);
-    content.append(&status);
-
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -736,6 +734,36 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
         .build();
     toolbar.set_content(Some(&scroll));
     toolbar
+}
+
+fn build_action_bar(ui: &Ui) -> adw::WrapBox {
+    let status = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    status.set_valign(gtk::Align::Center);
+    status.set_hexpand(true);
+    status.add_css_class("action-bar-status");
+    status.append(&ui.spinner);
+    status.append(&ui.status_label);
+    status.append(&ui.progress_bar);
+
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    actions.set_homogeneous(true);
+    actions.set_halign(gtk::Align::End);
+    actions.add_css_class("action-bar-actions");
+    actions.append(&ui.scan_button);
+    actions.append(&ui.import_button);
+    actions.append(&ui.cancel_button);
+
+    let bar = adw::WrapBox::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .child_spacing(12)
+        .line_spacing(8)
+        .natural_line_length(820)
+        .wrap_policy(adw::WrapPolicy::Natural)
+        .build();
+    bar.add_css_class("action-bar");
+    bar.append(&status);
+    bar.append(&actions);
+    bar
 }
 
 fn row_with_suffix(
