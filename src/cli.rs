@@ -28,7 +28,8 @@ pub enum Command {
     Devices,
     /// Vorhandene Scandatei automatisch aufteilen
     Split {
-        source: PathBuf,
+        #[arg(required = true, num_args = 1..)]
+        sources: Vec<PathBuf>,
         #[command(flatten)]
         split: SplitOptions,
         #[command(flatten)]
@@ -164,7 +165,7 @@ pub fn run(command: Command) -> Result<()> {
             }
         }
         Command::Split {
-            source,
+            sources,
             split,
             export,
         } => {
@@ -172,14 +173,30 @@ pub fn run(command: Command) -> Result<()> {
                 .output
                 .clone()
                 .unwrap_or_else(default_output_directory);
-            let result = split_scan(
-                &source,
-                &output,
-                &config(&export, Some(&split), None),
-                export.prefix.as_deref(),
-                !split.no_preview,
-            )?;
-            print_split_result(&result);
+            let config = config(&export, Some(&split), None);
+            let mut failed = 0usize;
+            for source in &sources {
+                println!("Datei: {}", source.display());
+                match split_scan(
+                    source,
+                    &output,
+                    &config,
+                    export.prefix.as_deref(),
+                    !split.no_preview,
+                ) {
+                    Ok(result) => print_split_result(&result),
+                    Err(error) => {
+                        failed += 1;
+                        eprintln!("Fehler bei {}: {error}", source.display());
+                    }
+                }
+            }
+            if failed > 0 {
+                bail!(
+                    "{failed} von {} Dateien konnten nicht verarbeitet werden",
+                    sources.len()
+                );
+            }
         }
         Command::Scan {
             scanner,
@@ -228,4 +245,20 @@ fn print_split_result(result: &photoscanner::splitter::SplitResult) {
         println!("Vorschau: {}", preview.display());
     }
     println!("Erkennungsschwellwert: {:.1}", result.threshold_used);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_accepts_multiple_sources() {
+        let cli = Cli::try_parse_from(["photoscanner", "split", "a.png", "b.png"])
+            .expect("mehrere Quellen parsen");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Split { sources, .. }) if sources == [PathBuf::from("a.png"), PathBuf::from("b.png")]
+        ));
+    }
 }

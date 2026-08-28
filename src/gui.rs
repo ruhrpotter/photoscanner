@@ -87,6 +87,10 @@ enum Message {
         operation_id: u64,
         percent: f64,
     },
+    Status {
+        operation_id: u64,
+        text: String,
+    },
     Devices {
         operation_id: u64,
         result: Result<Vec<ScannerDevice>, String>,
@@ -934,11 +938,16 @@ fn choose_import_file(ui: &Rc<Ui>) {
     filters.append(&filter);
     dialog.set_filters(Some(&filters));
     let import_ui = Rc::clone(ui);
-    dialog.open(Some(&ui.window), None::<&gio::Cancellable>, move |result| {
-        if let Ok(file) = result
-            && let Some(path) = file.path()
-        {
-            start_import(&import_ui, path);
+    dialog.open_multiple(Some(&ui.window), None::<&gio::Cancellable>, move |result| {
+        if let Ok(files) = result {
+            let paths = (0..files.n_items())
+                .filter_map(|index| files.item(index))
+                .filter_map(|item| item.downcast::<gio::File>().ok())
+                .filter_map(|file| file.path())
+                .collect::<Vec<_>>();
+            if !paths.is_empty() {
+                start_import(&import_ui, paths);
+            }
         }
     });
 }
@@ -1157,7 +1166,7 @@ fn scan_work(
     })
 }
 
-fn start_import(ui: &Ui, source: PathBuf) {
+fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
     if ui.busy.get() {
         return;
     }
@@ -1176,39 +1185,72 @@ fn start_import(ui: &Ui, source: PathBuf) {
     thread::spawn(move || {
         let result = run_worker(|| {
             (|| -> Result<WorkResult> {
-                ensure_not_cancelled(&cancellation)?;
-                if !source.is_file() {
-                    bail!("Die Scandatei existiert nicht mehr: {}", source.display());
-                }
-                if full_scan {
-                    let path = save_full_scan(&source, &output, &config, None)?;
+                let file_count = sources.len();
+                let mut photo_count = 0usize;
+                let mut failures = Vec::new();
+                let mut last_preview = None;
+                for (index, source) in sources.iter().enumerate() {
                     ensure_not_cancelled(&cancellation)?;
-                    let (preview, preview_directory) = bounded_preview(&path)?;
-                    return Ok(WorkResult {
-                        title: "Vollständige Scandatei gespeichert".to_string(),
-                        detail: path.display().to_string(),
-                        preview,
-                        preview_directory,
-                        capture_date: config
-                            .capture_date
-                            .unwrap_or_else(|| Local::now().date_naive()),
+                    let _ = sender.try_send(Message::Status {
+                        operation_id,
+                        text: format!("Analysiere Datei {} von {} …", index + 1, file_count),
                     });
+                    let processed = (|| -> Result<(usize, PathBuf, TempDir)> {
+                        if !source.is_file() {
+                            bail!("Die Scandatei existiert nicht mehr: {}", source.display());
+                        }
+                        if full_scan {
+                            let path = save_full_scan(source, &output, &config, None)?;
+                            ensure_not_cancelled(&cancellation)?;
+                            let (preview, preview_directory) = bounded_preview(&path)?;
+                            return Ok((1, preview, preview_directory));
+                        }
+                        let result = split_scan(source, &output, &config, None, true)?;
+                        ensure_not_cancelled(&cancellation)?;
+                        let preview_source = result
+                            .preview
+                            .clone()
+                            .or_else(|| result.files.first().cloned())
+                            .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
+                        let (preview, preview_directory) = bounded_preview(&preview_source)?;
+                        Ok((result.files.len(), preview, preview_directory))
+                    })();
+                    match processed {
+                        Ok((count, preview, preview_directory)) => {
+                            photo_count += count;
+                            last_preview = Some((preview, preview_directory));
+                        }
+                        Err(error) => {
+                            if cancellation.is_cancelled() {
+                                return Err(error);
+                            }
+                            let name = source
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("Unbekannte Datei");
+                            failures
+                                .push(format!("{name}: {}", error_summary(&format!("{error:#}"))));
+                        }
+                    }
                 }
-                let result = split_scan(&source, &output, &config, None, true)?;
                 ensure_not_cancelled(&cancellation)?;
-                let preview_source = result
-                    .preview
-                    .clone()
-                    .or_else(|| result.files.first().cloned())
-                    .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
-                let (preview, preview_directory) = bounded_preview(&preview_source)?;
+                let Some((preview, preview_directory)) = last_preview else {
+                    bail!(
+                        "Keine Datei konnte verarbeitet werden:\n{}",
+                        failures.join("\n")
+                    );
+                };
+                let mut detail = output.display().to_string();
+                if !failures.is_empty() {
+                    detail.push_str("\nFehler:\n");
+                    detail.push_str(&failures.join("\n"));
+                }
                 Ok(WorkResult {
-                    title: format!("{} Foto(s) aus Datei gespeichert", result.files.len()),
-                    detail: format!(
-                        "{} · Schwellwert {:.1}",
-                        output.display(),
-                        result.threshold_used
+                    title: format!(
+                        "{} Foto(s) aus {} Datei(en) gespeichert",
+                        photo_count, file_count
                     ),
+                    detail,
                     preview,
                     preview_directory,
                     capture_date: config
@@ -1269,6 +1311,7 @@ fn handle_message(ui: &Ui, message: Message) {
     let work_message = matches!(&message, Message::Work { .. });
     let message_operation_id = match &message {
         Message::Progress { operation_id, .. }
+        | Message::Status { operation_id, .. }
         | Message::Devices { operation_id, .. }
         | Message::Work { operation_id, .. } => *operation_id,
     };
@@ -1283,6 +1326,12 @@ fn handle_message(ui: &Ui, message: Message) {
                 &format!("Scanne … {percent:.0} %"),
                 gtk::AccessibleAnnouncementPriority::Low,
             );
+        }
+        return;
+    }
+    if let Message::Status { text, .. } = &message {
+        if !ui.closing.get() {
+            set_status(ui, text, gtk::AccessibleAnnouncementPriority::Low);
         }
         return;
     }
@@ -1301,6 +1350,9 @@ fn handle_message(ui: &Ui, message: Message) {
     match message {
         Message::Progress { .. } => {
             unreachable!("Fortschritt wird vor Terminalnachrichten behandelt")
+        }
+        Message::Status { .. } => {
+            unreachable!("Status wird vor Terminalnachrichten behandelt")
         }
         Message::Devices {
             result: Ok(devices),

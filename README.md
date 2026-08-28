@@ -70,7 +70,7 @@ sich die GUI mit `photoscanner gui` starten.
 
 Die Oberfläche bleibt während Scan und Bildverarbeitung reaktionsfähig. Ein
 laufender Vorgang lässt sich mit `Esc` abbrechen. Mit `F9` wird ein Scan
-gestartet, `Strg+O` importiert eine Datei und `Strg+L` wählt den Ausgabeordner.
+gestartet, `Strg+O` importiert eine oder mehrere Dateien und `Strg+L` wählt den Ausgabeordner.
 Bei einem schmalen niri-Tile wird die Einstellungsseite automatisch als
 einblendbare Seitenleiste dargestellt.
 
@@ -120,11 +120,14 @@ Gesamte Scanfläche speichern:
 photoscanner scan-full --dpi 600 --format tif --output ~/Bilder/Archiv
 ```
 
-Vorhandene Datei trennen:
+Vorhandene Dateien einzeln trennen:
 
 ```bash
-photoscanner split scan.png --output ~/Bilder/Archiv --threshold 10
+photoscanner split scan-1.png scan-2.png --output ~/Bilder/Archiv --threshold 10
 ```
+
+Die Oberfläche unterstützt beim Import ebenfalls eine Mehrfachauswahl. Fehler
+in einzelnen Dateien stoppen den restlichen Stapel nicht.
 
 Ohne `--output` verwenden CLI und Oberfläche gemeinsam den Ordner
 `~/Bilder/PhotoScanner` (oder `output/PhotoScanner`, wenn kein Bilderordner
