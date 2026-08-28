@@ -18,7 +18,7 @@ use opencv::imgproc;
 use opencv::prelude::*;
 use photoscanner::scanner::{
     DEVICE_DISCOVERY_TIMEOUT, ScannerCancellation, ScannerDevice, list_devices_cancellable,
-    scan_to_file_cancellable,
+    scan_to_file_with_progress,
 };
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use photoscanner::{APP_ID, APP_NAME};
@@ -52,6 +52,7 @@ struct Ui {
     cancel_button: gtk::Button,
     refresh_button: gtk::Button,
     spinner: gtk::Spinner,
+    progress_bar: gtk::ProgressBar,
     status_label: gtk::Label,
     preview_stack: gtk::Stack,
     picture: gtk::Picture,
@@ -77,6 +78,10 @@ struct Ui {
 }
 
 enum Message {
+    Progress {
+        operation_id: u64,
+        percent: f64,
+    },
     Devices {
         operation_id: u64,
         result: Result<Vec<ScannerDevice>, String>,
@@ -371,6 +376,11 @@ fn build_window(application: &adw::Application) {
     output_button.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+L")]);
 
     let spinner = gtk::Spinner::new();
+    let progress_bar = gtk::ProgressBar::builder()
+        .visible(false)
+        .width_request(160)
+        .valign(gtk::Align::Center)
+        .build();
     let status_label = gtk::Label::builder()
         .label("Bereit zum Scannen")
         .xalign(0.0)
@@ -401,6 +411,7 @@ fn build_window(application: &adw::Application) {
         cancel_button,
         refresh_button,
         spinner,
+        progress_bar,
         status_label,
         preview_stack,
         picture,
@@ -564,6 +575,7 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     status.add_css_class("status-card");
     status.append(&ui.spinner);
     status.append(&ui.status_label);
+    status.append(&ui.progress_bar);
     content.append(&status);
 
     let scroll = gtk::ScrolledWindow::builder()
@@ -901,9 +913,28 @@ fn start_scan(ui: &Ui) {
     let sender = ui.sender.clone();
     let (operation_id, cancellation) = begin_operation(ui);
     set_busy(ui, true, &format!("Scanne mit {dpi} dpi …"));
+    ui.spinner.stop();
+    ui.progress_bar.set_fraction(0.0);
+    ui.progress_bar.set_visible(true);
     thread::spawn(move || {
+        let progress_sender = sender.clone();
+        let progress = Box::new(move |percent| {
+            let _ = progress_sender.try_send(Message::Progress {
+                operation_id,
+                percent,
+            });
+        });
         let result = run_worker(|| {
-            scan_work(&device, dpi, &output, &config, full_scan, &cancellation).map_err(|error| {
+            scan_work(
+                &device,
+                dpi,
+                &output,
+                &config,
+                full_scan,
+                &cancellation,
+                Some(progress),
+            )
+            .map_err(|error| {
                 if cancellation.is_cancelled() {
                     CANCELLED_MESSAGE.to_string()
                 } else {
@@ -925,16 +956,18 @@ fn scan_work(
     config: &SplitConfig,
     full_scan: bool,
     cancellation: &ScannerCancellation,
+    progress: Option<Box<dyn Fn(f64) + Send>>,
 ) -> Result<WorkResult> {
     ensure_not_cancelled(cancellation)?;
     let temporary = TempDir::with_prefix("photoscanner-")?;
     let source = temporary.path().join("scan.png");
-    scan_to_file_cancellable(
+    scan_to_file_with_progress(
         &source,
         Some(&device.name),
         dpi,
         Duration::from_secs(600),
         cancellation,
+        progress,
     )?;
     ensure_not_cancelled(cancellation)?;
     if full_scan {
@@ -1085,12 +1118,25 @@ fn request_devices(ui: &Ui) {
 fn handle_message(ui: &Ui, message: Message) {
     let work_message = matches!(&message, Message::Work { .. });
     let message_operation_id = match &message {
-        Message::Devices { operation_id, .. } | Message::Work { operation_id, .. } => *operation_id,
+        Message::Progress { operation_id, .. }
+        | Message::Devices { operation_id, .. }
+        | Message::Work { operation_id, .. } => *operation_id,
     };
     if message_operation_id != ui.operation_id.get() {
         return;
     }
-    if matches!(message, Message::Devices { .. }) {
+    if let Message::Progress { percent, .. } = &message {
+        if !ui.closing.get() {
+            ui.progress_bar.set_fraction(*percent / 100.0);
+            set_status(
+                ui,
+                &format!("Scanne … {percent:.0} %"),
+                gtk::AccessibleAnnouncementPriority::Low,
+            );
+        }
+        return;
+    }
+    if matches!(&message, Message::Devices { .. }) {
         ui.discovery_pending.set(false);
         ui.cancel_action.set_enabled(false);
         ui.cancel_button.set_visible(false);
@@ -1103,6 +1149,9 @@ fn handle_message(ui: &Ui, message: Message) {
     }
 
     match message {
+        Message::Progress { .. } => {
+            unreachable!("Fortschritt wird vor Terminalnachrichten behandelt")
+        }
         Message::Devices {
             result: Ok(devices),
             ..
@@ -1212,6 +1261,8 @@ fn set_busy(ui: &Ui, busy: bool, status: &str) {
     ui.output_action.set_enabled(!busy);
     ui.cancel_action.set_enabled(busy);
     ui.cancel_button.set_visible(busy);
+    ui.progress_bar.set_visible(false);
+    ui.progress_bar.set_fraction(0.0);
     ui.device_dropdown.set_sensitive(!busy);
     ui.mode_dropdown.set_sensitive(!busy);
     ui.dpi_dropdown.set_sensitive(!busy);

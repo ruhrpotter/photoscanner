@@ -249,6 +249,70 @@ fn pipe_reader<R: Read + Send + 'static>(
     thread::spawn(move || drain_capped(reader, limit))
 }
 
+fn progress_pipe_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    limit: usize,
+    progress: Option<Box<dyn Fn(f64) + Send>>,
+) -> JoinHandle<io::Result<Vec<u8>>> {
+    thread::spawn(move || {
+        let mut captured = Vec::new();
+        let mut pending = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            for &byte in &buffer[..count] {
+                if matches!(byte, b'\r' | b'\n') {
+                    capture_stderr_token(&mut captured, &pending, limit, progress.as_deref());
+                    pending.clear();
+                } else if pending.len() < limit {
+                    pending.push(byte);
+                }
+            }
+        }
+        capture_stderr_token(&mut captured, &pending, limit, progress.as_deref());
+        Ok(captured)
+    })
+}
+
+fn capture_stderr_token(
+    captured: &mut Vec<u8>,
+    token: &[u8],
+    limit: usize,
+    progress: Option<&(dyn Fn(f64) + Send)>,
+) {
+    let text = String::from_utf8_lossy(token);
+    let trimmed = text.trim();
+    if let Some(percent) = parse_progress(trimmed) {
+        if let Some(progress) = progress {
+            progress(percent);
+        }
+        return;
+    }
+    if trimmed.is_empty() || captured.len() >= limit {
+        return;
+    }
+    if !captured.is_empty() {
+        captured.push(b'\n');
+    }
+    let remaining = limit.saturating_sub(captured.len());
+    captured.extend_from_slice(&token[..token.len().min(remaining)]);
+}
+
+fn parse_progress(value: &str) -> Option<f64> {
+    value
+        .strip_prefix("Progress:")?
+        .trim()
+        .strip_suffix('%')?
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 100.0))
+}
+
 fn join_reader(reader: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, ScannerError> {
     reader
         .join()
@@ -400,6 +464,21 @@ pub fn scan_to_file_cancellable(
     timeout: Duration,
     cancellation: &ScannerCancellation,
 ) -> Result<PathBuf, ScannerError> {
+    scan_to_file_with_progress(destination, device, dpi, timeout, cancellation, None)
+}
+
+/// Scannt abbrechbar in eine Datei und meldet Fortschrittswerte von 0 bis 100.
+///
+/// Fortschrittsmeldungen werden direkt aus dem Drain-Thread für `scanimage`
+/// aufgerufen. Der Callback darf deshalb nicht blockieren.
+pub fn scan_to_file_with_progress(
+    destination: &Path,
+    device: Option<&str>,
+    dpi: u32,
+    timeout: Duration,
+    cancellation: &ScannerCancellation,
+    progress: Option<Box<dyn Fn(f64) + Send>>,
+) -> Result<PathBuf, ScannerError> {
     scan_to_file_with_program(
         &ScannerProgram::new("scanimage"),
         destination,
@@ -407,6 +486,7 @@ pub fn scan_to_file_cancellable(
         dpi,
         timeout,
         cancellation,
+        progress,
     )
 }
 
@@ -417,6 +497,7 @@ fn scan_to_file_with_program(
     dpi: u32,
     timeout: Duration,
     cancellation: &ScannerCancellation,
+    progress: Option<Box<dyn Fn(f64) + Send>>,
 ) -> Result<PathBuf, ScannerError> {
     if cancellation.is_cancelled() {
         return Err(ScannerError::Cancelled);
@@ -448,6 +529,7 @@ fn scan_to_file_with_program(
                 &dpi.to_string(),
                 "--format",
                 "png",
+                "--progress",
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::from(output))
@@ -458,7 +540,7 @@ fn scan_to_file_with_program(
     let stderr_reader = child
         .stderr
         .take()
-        .map(|pipe| pipe_reader(pipe, STDERR_LIMIT));
+        .map(|pipe| progress_pipe_reader(pipe, STDERR_LIMIT, progress));
     let wait_result = wait_for_child_cancellable(&mut child, timeout, Some(cancellation));
     if wait_result.is_err() {
         let _ = terminate_and_reap(&mut child);
@@ -666,11 +748,52 @@ printf 'fake-png-data'
             300,
             Duration::from_secs(5),
             &ScannerCancellation::new(),
+            None,
         )
         .expect("Scan darf nicht an einer vollen stderr-Pipe hängen");
 
         assert_eq!(result, destination);
         assert_eq!(fs::read(&result).expect("Scan lesen"), b"fake-png-data");
+        assert_no_scan_temp_files(output_directory.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_progress_without_polluting_scan_errors() {
+        let (_directory, program) = fake_scanimage(
+            r#"
+printf 'Progress: 4.5%%\r' >&2
+printf 'scan feeder warning\n' >&2
+printf 'Progress: 31.4%%\rProgress: 101.0%%\n' >&2
+printf 'partial-data'
+exit 7
+"#,
+        );
+        let output_directory = tempfile::tempdir().expect("Ausgabeordner anlegen");
+        let destination = output_directory.path().join("scan.png");
+        let values = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let callback_values = std::sync::Arc::clone(&values);
+
+        let error = scan_to_file_with_program(
+            &program,
+            &destination,
+            None,
+            300,
+            Duration::from_secs(2),
+            &ScannerCancellation::new(),
+            Some(Box::new(move |percent| {
+                callback_values.lock().expect("progress lock").push(percent);
+            })),
+        )
+        .expect_err("Fehlerstatus muss gemeldet werden");
+
+        assert_eq!(
+            *values.lock().expect("progress lock"),
+            vec![4.5, 31.4, 100.0]
+        );
+        assert!(
+            matches!(error, ScannerError::ScanFailed(detail) if detail == "scan feeder warning")
+        );
         assert_no_scan_temp_files(output_directory.path());
     }
 
@@ -698,6 +821,7 @@ while :; do :; done
             300,
             Duration::from_millis(80),
             &ScannerCancellation::new(),
+            None,
         )
         .expect_err("Endloser Scannerprozess muss in den Timeout laufen");
 
@@ -745,6 +869,7 @@ while :; do :; done
             300,
             Duration::from_secs(5),
             &cancellation,
+            None,
         )
         .expect_err("Abbruchsignal muss den Scannerprozess beenden");
         trigger.join().expect("Abbruchthread beenden");
@@ -782,6 +907,7 @@ exit 7
             300,
             Duration::from_secs(2),
             &ScannerCancellation::new(),
+            None,
         )
         .expect_err("Fehlerstatus muss gemeldet werden");
         assert!(matches!(error, ScannerError::ScanFailed(_)));
@@ -795,6 +921,7 @@ exit 7
             300,
             Duration::from_secs(2),
             &ScannerCancellation::new(),
+            None,
         )
         .expect_err("Startfehler muss gemeldet werden");
         assert!(matches!(error, ScannerError::ScanimageMissing));
@@ -816,6 +943,7 @@ exit 7
             300,
             Duration::from_secs(2),
             &ScannerCancellation::new(),
+            None,
         )
         .expect_err("Bestehendes Ziel muss erhalten bleiben");
 
@@ -852,6 +980,7 @@ printf '%s' "$$"
                 300,
                 Duration::from_secs(5),
                 &ScannerCancellation::new(),
+                None,
             )
         });
         let second_program = program.clone();
@@ -864,6 +993,7 @@ printf '%s' "$$"
                 300,
                 Duration::from_secs(5),
                 &ScannerCancellation::new(),
+                None,
             )
         });
 
