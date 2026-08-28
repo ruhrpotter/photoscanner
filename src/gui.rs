@@ -56,6 +56,7 @@ struct Ui {
     devices: Rc<RefCell<Vec<ScannerDevice>>>,
     output_directory: Rc<RefCell<PathBuf>>,
     busy: Rc<Cell<bool>>,
+    discovery_pending: Rc<Cell<bool>>,
     sender: Sender<Message>,
     operation_id: Rc<Cell<u64>>,
     cancellation: Rc<RefCell<Option<ScannerCancellation>>>,
@@ -215,6 +216,7 @@ fn build_window(application: &adw::Application) {
     let devices = Rc::new(RefCell::new(Vec::new()));
     let output_directory = Rc::new(RefCell::new(default_output_directory()));
     let busy = Rc::new(Cell::new(false));
+    let discovery_pending = Rc::new(Cell::new(false));
     let operation_id = Rc::new(Cell::new(0));
     let cancellation = Rc::new(RefCell::new(None));
     let application_hold = Rc::new(RefCell::new(None));
@@ -389,6 +391,7 @@ fn build_window(application: &adw::Application) {
         devices,
         output_directory,
         busy,
+        discovery_pending,
         sender,
         operation_id,
         cancellation,
@@ -1015,6 +1018,7 @@ fn request_devices(ui: &Ui) {
     if ui.busy.get() {
         return;
     }
+    ui.discovery_pending.set(true);
     let (operation_id, cancellation) = begin_operation(ui);
     ui.refresh_action.set_enabled(false);
     ui.scan_action.set_enabled(false);
@@ -1045,6 +1049,7 @@ fn request_devices(ui: &Ui) {
 }
 
 fn handle_message(ui: &Ui, message: Message) {
+    let work_message = matches!(&message, Message::Work { .. });
     let message_operation_id = match &message {
         Message::Devices { operation_id, .. } | Message::Work { operation_id, .. } => *operation_id,
     };
@@ -1052,6 +1057,7 @@ fn handle_message(ui: &Ui, message: Message) {
         return;
     }
     if matches!(message, Message::Devices { .. }) {
+        ui.discovery_pending.set(false);
         ui.cancel_action.set_enabled(false);
         ui.cancel_button.set_visible(false);
     }
@@ -1137,6 +1143,9 @@ fn handle_message(ui: &Ui, message: Message) {
                 show_error(ui, &error);
             }
         }
+    }
+    if work_message && ui.discovery_pending.get() {
+        request_devices(ui);
     }
 }
 
