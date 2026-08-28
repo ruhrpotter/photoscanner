@@ -126,6 +126,10 @@ Vorhandene Datei trennen:
 photoscanner split scan.png --output ~/Bilder/Archiv --threshold 10
 ```
 
+Ohne `--output` verwenden CLI und Oberfläche gemeinsam den Ordner
+`~/Bilder/PhotoScanner` (oder `output/PhotoScanner`, wenn kein Bilderordner
+ermittelt werden kann).
+
 Alle Befehle und Optionen:
 
 ```bash

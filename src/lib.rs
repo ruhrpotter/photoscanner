@@ -5,6 +5,8 @@
 
 #![warn(missing_docs)]
 
+use std::path::PathBuf;
+
 mod metadata;
 
 /// SANE-Geräteerkennung und abbrechbare Scanprozesse.
@@ -16,3 +18,10 @@ pub mod splitter;
 pub const APP_ID: &str = "de.martin.PhotoScanner";
 /// Anzeigename der Anwendung.
 pub const APP_NAME: &str = "Photo Scanner";
+
+/// Liefert den gemeinsamen Standard-Ausgabeordner für GUI und CLI.
+pub fn default_output_directory() -> PathBuf {
+    dirs::picture_dir()
+        .unwrap_or_else(|| PathBuf::from("output"))
+        .join("PhotoScanner")
+}

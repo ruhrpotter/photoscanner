@@ -21,7 +21,7 @@ use photoscanner::scanner::{
     scan_to_file_cancellable,
 };
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
-use photoscanner::{APP_ID, APP_NAME};
+use photoscanner::{APP_ID, APP_NAME, default_output_directory};
 use tempfile::TempDir;
 
 const DEFAULT_STYLE: &str = include_str!("style.css");
@@ -446,12 +446,6 @@ fn build_window(application: &adw::Application) {
     update_control_states(&ui);
     ui.window.set_default_widget(Some(&ui.scan_button));
     window.present();
-}
-
-fn default_output_directory() -> PathBuf {
-    dirs::picture_dir()
-        .unwrap_or_else(|| PathBuf::from("output"))
-        .join("PhotoScanner")
 }
 
 fn short_path(path: &Path) -> String {

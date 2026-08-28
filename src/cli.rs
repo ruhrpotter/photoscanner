@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use photoscanner::default_output_directory;
 use photoscanner::scanner::{DEVICE_DISCOVERY_TIMEOUT, list_devices, scan_to_file};
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use tempfile::TempDir;
@@ -76,8 +77,13 @@ fn parse_date(value: &str) -> Result<NaiveDate, String> {
 
 #[derive(Clone, Debug, Args)]
 pub struct ExportOptions {
-    #[arg(short, long, default_value = "output")]
-    output: PathBuf,
+    #[arg(
+        short,
+        long,
+        value_name = "ORDNER",
+        help = "Ausgabeordner (Standard: Bilder/PhotoScanner)"
+    )]
+    output: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t)]
     format: FormatArgument,
     #[arg(long, default_value_t = 95, value_parser = clap::value_parser!(i32).range(1..=100))]
@@ -162,9 +168,13 @@ pub fn run(command: Command) -> Result<()> {
             split,
             export,
         } => {
+            let output = export
+                .output
+                .clone()
+                .unwrap_or_else(default_output_directory);
             let result = split_scan(
                 &source,
-                &export.output,
+                &output,
                 &config(&export, Some(&split), None),
                 export.prefix.as_deref(),
                 !split.no_preview,
@@ -177,9 +187,13 @@ pub fn run(command: Command) -> Result<()> {
             export,
         } => {
             let (_temporary, source) = acquire(&scanner)?;
+            let output = export
+                .output
+                .clone()
+                .unwrap_or_else(default_output_directory);
             let result = split_scan(
                 &source,
-                &export.output,
+                &output,
                 &config(&export, Some(&split), Some(scanner.dpi)),
                 export.prefix.as_deref(),
                 !split.no_preview,
@@ -188,9 +202,13 @@ pub fn run(command: Command) -> Result<()> {
         }
         Command::ScanFull { scanner, export } => {
             let (_temporary, source) = acquire(&scanner)?;
+            let output = export
+                .output
+                .clone()
+                .unwrap_or_else(default_output_directory);
             let path = save_full_scan(
                 &source,
-                &export.output,
+                &output,
                 &config(&export, None, Some(scanner.dpi)),
                 export.prefix.as_deref(),
             )
