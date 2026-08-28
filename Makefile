@@ -18,7 +18,7 @@ check:
 	msgfmt --check po/de.po -o /dev/null
 	msgcmp --use-fuzzy po/de.po po/photoscanner.pot
 	desktop-file-validate data/de.martin.PhotoScanner.desktop
-	appstreamcli validate --strict --no-net --override=url-homepage-missing=pedantic data/de.martin.PhotoScanner.metainfo.xml
+	appstreamcli validate --strict --no-net data/de.martin.PhotoScanner.metainfo.xml
 
 pot:
 	xtr src/main.rs src/lib.rs -k tr -k tr_args -k 'trn:1,2' --package-name photoscanner --package-version 0.2.0 -o po/photoscanner.pot
