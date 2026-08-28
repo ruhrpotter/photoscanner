@@ -111,6 +111,10 @@ enum Message {
         operation_id: u64,
         text: String,
     },
+    ScanComplete {
+        operation_id: u64,
+        text: String,
+    },
     ReviewReady {
         operation_id: u64,
         result: Result<ReviewData, String>,
@@ -143,6 +147,18 @@ enum ScanMode {
     Direct,
     Review,
     Full,
+}
+
+fn status_after_scan(mode: ScanMode) -> String {
+    match mode {
+        ScanMode::Full => tr("Saving scan…"),
+        ScanMode::Direct | ScanMode::Review => tr("Analyzing scan file…"),
+    }
+}
+
+struct ScanCallbacks {
+    progress: Option<Box<dyn Fn(f64) + Send>>,
+    complete: Option<Box<dyn Fn() + Send>>,
 }
 
 struct ReviewPhotoData {
@@ -1428,6 +1444,14 @@ fn start_scan(ui: &Ui) {
                 percent,
             });
         });
+        let phase_sender = sender.clone();
+        let phase_text = status_after_scan(scan_mode);
+        let scan_complete = Box::new(move || {
+            let _ = phase_sender.try_send(Message::ScanComplete {
+                operation_id,
+                text: phase_text.clone(),
+            });
+        });
         let result = run_worker(|| {
             scan_work(
                 &device,
@@ -1436,7 +1460,10 @@ fn start_scan(ui: &Ui) {
                 &config,
                 scan_mode,
                 &cancellation,
-                Some(progress),
+                ScanCallbacks {
+                    progress: Some(progress),
+                    complete: Some(scan_complete),
+                },
             )
             .map_err(|error| {
                 if cancellation.is_cancelled() {
@@ -1471,8 +1498,9 @@ fn scan_work(
     config: &SplitConfig,
     mode: ScanMode,
     cancellation: &ScannerCancellation,
-    progress: Option<Box<dyn Fn(f64) + Send>>,
+    callbacks: ScanCallbacks,
 ) -> Result<ScanOutcome> {
+    let ScanCallbacks { progress, complete } = callbacks;
     ensure_not_cancelled(cancellation)?;
     let temporary = TempDir::with_prefix("photoscanner-")?;
     let source = temporary.path().join("scan.png");
@@ -1485,6 +1513,9 @@ fn scan_work(
         progress,
     )?;
     ensure_not_cancelled(cancellation)?;
+    if let Some(complete) = complete {
+        complete();
+    }
     if matches!(mode, ScanMode::Full) {
         let path = save_full_scan(&source, output, config, None)?;
         ensure_not_cancelled(cancellation)?;
@@ -1928,6 +1959,7 @@ fn handle_message(ui: &Ui, message: Message) {
     let message_operation_id = match &message {
         Message::Progress { operation_id, .. }
         | Message::Status { operation_id, .. }
+        | Message::ScanComplete { operation_id, .. }
         | Message::Devices { operation_id, .. }
         | Message::ReviewReady { operation_id, .. }
         | Message::Work { operation_id, .. } => *operation_id,
@@ -1955,6 +1987,15 @@ fn handle_message(ui: &Ui, message: Message) {
         }
         return;
     }
+    if let Message::ScanComplete { text, .. } = &message {
+        if !ui.closing.get() {
+            ui.progress_bar.set_visible(false);
+            ui.progress_bar.set_fraction(0.0);
+            ui.spinner.start();
+            set_status(ui, text, gtk::AccessibleAnnouncementPriority::Low);
+        }
+        return;
+    }
     if matches!(&message, Message::Devices { .. }) {
         ui.discovery_pending.set(false);
         ui.cancel_action.set_enabled(false);
@@ -1973,6 +2014,9 @@ fn handle_message(ui: &Ui, message: Message) {
         }
         Message::Status { .. } => {
             unreachable!("status is handled before terminal messages")
+        }
+        Message::ScanComplete { .. } => {
+            unreachable!("scan completion is handled before terminal messages")
         }
         Message::Devices {
             result: Ok(devices),
@@ -2758,6 +2802,19 @@ mod tests {
 
         assert_eq!((clockwise.cols(), clockwise.rows()), (40, 90));
         assert_eq!((upside_down.cols(), upside_down.rows()), (90, 40));
+    }
+
+    #[test]
+    fn scan_status_switches_to_the_follow_up_phase() {
+        assert_eq!(status_after_scan(ScanMode::Full), tr("Saving scan…"));
+        assert_eq!(
+            status_after_scan(ScanMode::Direct),
+            tr("Analyzing scan file…")
+        );
+        assert_eq!(
+            status_after_scan(ScanMode::Review),
+            tr("Analyzing scan file…")
+        );
     }
 
     #[test]

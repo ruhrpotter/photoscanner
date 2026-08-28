@@ -53,6 +53,9 @@ msgstr "Vorgang abgebrochen."
 msgid "Internal background worker error."
 msgstr "Interner Fehler im Hintergrundprozess."
 
+msgid "Saving scan…"
+msgstr "Speichere Scan …"
+
 msgid "Could not create the theme directory ({directory}): {error}"
 msgstr "Theme-Ordner konnte nicht angelegt werden ({directory}): {error}"
 
