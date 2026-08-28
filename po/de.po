@@ -179,11 +179,23 @@ msgstr "Zusätzlicher Rand (%)"
 msgid "Keep some space around each photo"
 msgstr "Etwas Fläche um jedes Foto erhalten"
 
+msgid "Scan overview"
+msgstr "Scanübersicht"
+
+msgid "Green outlines show the detected areas in the original scan."
+msgstr "Grüne Umrisse zeigen die erkannten Bereiche im Originalscan."
+
 msgid "Review detected photos"
 msgstr "Erkannte Fotos prüfen"
 
+msgid "Review the selection and orientation before export."
+msgstr "Auswahl und Ausrichtung vor dem Export kontrollieren."
+
 msgid "Save photos"
 msgstr "Fotos speichern"
+
+msgid "Detected photos"
+msgstr "Erkannte Fotos"
 
 msgid "Discard"
 msgstr "Verwerfen"
@@ -301,16 +313,27 @@ msgstr "Scanvorschau"
 msgid "Operation failed"
 msgstr "Vorgang fehlgeschlagen"
 
+msgid "{count} photo detected"
+msgid_plural "{count} photos detected"
+msgstr[0] "{count} Foto erkannt"
+msgstr[1] "{count} Fotos erkannt"
+
 msgid "Save {count} photo"
 msgid_plural "Save {count} photos"
 msgstr[0] "{count} Foto speichern"
 msgstr[1] "{count} Fotos speichern"
 
-msgid "Save photo {number}"
-msgstr "Foto {number} speichern"
+msgid "Photo {number}"
+msgstr "Foto {number}"
 
-msgid "Rotate 90° clockwise"
-msgstr "90° nach rechts drehen"
+msgid "Include photo {number} in the export"
+msgstr "Foto {number} in den Export aufnehmen"
+
+msgid "Rotate photo {number} 90° clockwise"
+msgstr "Foto {number} um 90° nach rechts drehen"
+
+msgid "{selected} of {total} selected"
+msgstr "{selected} von {total} ausgewählt"
 
 msgid "Review discarded"
 msgstr "Prüfung verworfen"

@@ -25,6 +25,87 @@
   box-shadow: 0 8px 32px rgb(0 0 0 / 14%);
 }
 
+.review-page {
+  background: var(--card-bg-color);
+}
+
+.review-header {
+  padding: 14px 18px;
+}
+
+.review-content {
+  padding: 14px 18px 18px;
+}
+
+.review-primary-action {
+  min-height: 42px;
+  padding-left: 18px;
+  padding-right: 18px;
+  font-weight: 700;
+}
+
+.review-overview-card {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--view-bg-color) 88%, var(--accent-bg-color));
+}
+
+.review-overview-frame {
+  padding: 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--view-bg-color) 92%, white);
+}
+
+.review-overview-image {
+  border-radius: 8px;
+}
+
+.review-selection-counter {
+  color: var(--accent-color);
+  font-weight: 650;
+}
+
+.review-card {
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 16px;
+  background: var(--card-bg-color);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+  transition: 160ms ease;
+}
+
+.review-card:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 42%, transparent);
+  background: color-mix(in srgb, var(--card-bg-color) 94%, var(--accent-bg-color));
+}
+
+.review-card.included {
+  border-color: color-mix(in srgb, var(--accent-color) 28%, transparent);
+}
+
+.review-card.excluded {
+  box-shadow: none;
+}
+
+.review-card.excluded .review-photo {
+  opacity: 0.42;
+}
+
+.review-photo-frame {
+  padding: 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--view-bg-color) 94%, black);
+}
+
+.review-photo {
+  transition: 160ms ease;
+}
+
+.review-card-controls {
+  min-height: 40px;
+}
+
 .empty-preview-icon {
   color: var(--accent-color);
   opacity: 0.8;

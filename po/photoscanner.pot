@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photoscanner 0.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 05:43+0000\n"
+"POT-Creation-Date: 2026-08-28 05:54+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -72,403 +72,433 @@ msgstr ""
 msgid "Internal background worker error."
 msgstr ""
 
-#: src/gui.rs:217
+#: src/gui.rs:219
 msgid "Could not create the theme directory ({directory}): {error}"
 msgstr ""
 
-#: src/gui.rs:228
+#: src/gui.rs:230
 msgid "The custom theme could not be installed."
 msgstr ""
 
-#: src/gui.rs:239
+#: src/gui.rs:241
 msgid "Error in theme.css: {error}"
 msgstr ""
 
-#: src/gui.rs:264
+#: src/gui.rs:266
 msgid "Theme changes cannot be monitored: {error}"
 msgstr ""
 
-#: src/gui.rs:301
+#: src/gui.rs:303
 msgid "Could not read the theme: {path}"
 msgstr ""
 
-#: src/gui.rs:347 src/gui.rs:1693
+#: src/gui.rs:349 src/gui.rs:1803
 msgid "Searching for scanners…"
 msgstr ""
 
-#: src/gui.rs:349
+#: src/gui.rs:351
 msgid "Scanner"
 msgstr ""
 
-#: src/gui.rs:354
+#: src/gui.rs:356
 msgid "Automatically separate photos"
 msgstr ""
 
-#: src/gui.rs:355
+#: src/gui.rs:357
 msgid "Save the entire scan area"
 msgstr ""
 
-#: src/gui.rs:358
+#: src/gui.rs:360
 msgid "Processing"
 msgstr ""
 
-#: src/gui.rs:369
+#: src/gui.rs:371
 msgid "Resolution"
 msgstr ""
 
-#: src/gui.rs:376
+#: src/gui.rs:378
 msgid "Image format"
 msgstr ""
 
-#: src/gui.rs:382
+#: src/gui.rs:384
 msgid "Capture date"
 msgstr ""
 
-#: src/gui.rs:393
+#: src/gui.rs:395
 msgid "Capture date in day dot month dot year format"
 msgstr ""
 
-#: src/gui.rs:403
+#: src/gui.rs:405
 msgid "Open calendar"
 msgstr ""
 
-#: src/gui.rs:431 src/gui.rs:437
+#: src/gui.rs:433 src/gui.rs:439
 msgid "Search for scanners again"
 msgstr ""
 
-#: src/gui.rs:438
+#: src/gui.rs:440
 msgid "Query SANE and AirScan devices again"
 msgstr ""
 
-#: src/gui.rs:443
+#: src/gui.rs:445
 msgid "Start scan"
 msgstr ""
 
-#: src/gui.rs:450 src/gui.rs:1119
+#: src/gui.rs:452 src/gui.rs:1229
 msgid "Open scan file"
 msgstr ""
 
-#: src/gui.rs:456 src/gui.rs:463
+#: src/gui.rs:458 src/gui.rs:465
 msgid "Cancel"
 msgstr ""
 
-#: src/gui.rs:489
+#: src/gui.rs:491
 msgid "Ready to scan"
 msgstr ""
 
-#: src/gui.rs:622
+#: src/gui.rs:628
 msgid "Output folder"
 msgstr ""
 
-#: src/gui.rs:630
+#: src/gui.rs:636
 msgid "Digitize paper photos"
 msgstr ""
 
-#: src/gui.rs:641
+#: src/gui.rs:647
 msgid "Scan"
 msgstr ""
 
-#: src/gui.rs:644
+#: src/gui.rs:650
 msgid "Refresh devices"
 msgstr ""
 
-#: src/gui.rs:645
+#: src/gui.rs:651
 msgid "Query SANE and AirScan again"
 msgstr ""
 
-#: src/gui.rs:652
+#: src/gui.rs:658
 msgid "Review before saving"
 msgstr ""
 
-#: src/gui.rs:653
+#: src/gui.rs:659
 msgid "Select and rotate detected photos"
 msgstr ""
 
-#: src/gui.rs:662
+#: src/gui.rs:668
 msgid "Output"
 msgstr ""
 
-#: src/gui.rs:664
+#: src/gui.rs:670
 msgid "Folder"
 msgstr ""
 
-#: src/gui.rs:665
+#: src/gui.rs:671
 msgid "Photos and detection preview"
 msgstr ""
 
-#: src/gui.rs:672
+#: src/gui.rs:678
 msgid "JPEG quality"
 msgstr ""
 
-#: src/gui.rs:673
+#: src/gui.rs:679
 msgid "Only for exported JPG photos"
 msgstr ""
 
-#: src/gui.rs:679
+#: src/gui.rs:685
 msgid "Detection"
 msgstr ""
 
-#: src/gui.rs:681
+#: src/gui.rs:687
 msgid "Automatic detection is optimized for light scanner beds."
 msgstr ""
 
-#: src/gui.rs:685
+#: src/gui.rs:691
 msgid "Automatic threshold"
 msgstr ""
 
-#: src/gui.rs:686
+#: src/gui.rs:692
 msgid "Evaluate background noise along the edges"
 msgstr ""
 
-#: src/gui.rs:692
+#: src/gui.rs:698
 msgid "Manual threshold"
 msgstr ""
 
-#: src/gui.rs:697
+#: src/gui.rs:703
 msgid "Minimum area (%)"
 msgstr ""
 
-#: src/gui.rs:698
+#: src/gui.rs:704
 msgid "Ignore small dust and edge areas"
 msgstr ""
 
-#: src/gui.rs:702
+#: src/gui.rs:708
 msgid "Additional margin (%)"
 msgstr ""
 
-#: src/gui.rs:703
+#: src/gui.rs:709
 msgid "Keep some space around each photo"
 msgstr ""
 
-#: src/gui.rs:784
+#: src/gui.rs:787 src/gui.rs:801
+msgid "Scan overview"
+msgstr ""
+
+#: src/gui.rs:789 src/gui.rs:809
+msgid "Green outlines show the detected areas in the original scan."
+msgstr ""
+
+#: src/gui.rs:849
 msgid "Review detected photos"
 msgstr ""
 
-#: src/gui.rs:790
+#: src/gui.rs:855
+msgid "Review the selection and orientation before export."
+msgstr ""
+
+#: src/gui.rs:865
 msgid "Save photos"
 msgstr ""
 
-#: src/gui.rs:795
+#: src/gui.rs:871
 msgid "Discard"
 msgstr ""
 
-#: src/gui.rs:823
+#: src/gui.rs:890
+msgid "Detected photos"
+msgstr ""
+
+#: src/gui.rs:931
 msgid "No preview yet"
 msgstr ""
 
-#: src/gui.rs:826
+#: src/gui.rs:934
 msgid "Start a scan or open an existing scan file."
 msgstr ""
 
-#: src/gui.rs:859
+#: src/gui.rs:969
 msgid "Preview"
 msgstr ""
 
-#: src/gui.rs:860
+#: src/gui.rs:970
 msgid "Detected photo boundaries"
 msgstr ""
 
-#: src/gui.rs:864 src/gui.rs:869
+#: src/gui.rs:974 src/gui.rs:979
 msgid "Show or hide settings"
 msgstr ""
 
-#: src/gui.rs:871
+#: src/gui.rs:981
 msgid "Opens or closes the sidebar containing the scan settings"
 msgstr ""
 
-#: src/gui.rs:879
+#: src/gui.rs:989
 msgid "Fit to window"
 msgstr ""
 
-#: src/gui.rs:882
+#: src/gui.rs:992
 msgid "Zoom out"
 msgstr ""
 
-#: src/gui.rs:883
+#: src/gui.rs:993
 msgid "Zoom in"
 msgstr ""
 
-#: src/gui.rs:1097
+#: src/gui.rs:1207
 msgid "Select output folder"
 msgstr ""
 
-#: src/gui.rs:1123
+#: src/gui.rs:1233
 msgid "Images"
 msgstr ""
 
-#: src/gui.rs:1154
+#: src/gui.rs:1264
 msgid "Capture date must use the DD.MM.YYYY format"
 msgstr ""
 
-#: src/gui.rs:1249
+#: src/gui.rs:1359
 msgid "No scanner is selected."
 msgstr ""
 
-#: src/gui.rs:1278
+#: src/gui.rs:1388
 msgid "Scanning at {dpi} dpi…"
 msgstr ""
 
-#: src/gui.rs:1353
+#: src/gui.rs:1463
 msgid "Complete scan saved"
 msgstr ""
 
-#: src/gui.rs:1378 src/gui.rs:1491
+#: src/gui.rs:1488 src/gui.rs:1601
 msgid "No preview file was created"
 msgstr ""
 
-#: src/gui.rs:1382 src/gui.rs:2143
+#: src/gui.rs:1492 src/gui.rs:2308
 msgid "{count} photo saved"
 msgid_plural "{count} photos saved"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/gui.rs:1387
+#: src/gui.rs:1497
 msgid "{output} · Threshold {threshold}"
 msgstr ""
 
-#: src/gui.rs:1420
+#: src/gui.rs:1530
 msgid "Analyzing scan file…"
 msgstr ""
 
-#: src/gui.rs:1434 src/gui.rs:1465
+#: src/gui.rs:1544 src/gui.rs:1575
 msgid "Analyzing file {index} of {total}…"
 msgstr ""
 
-#: src/gui.rs:1475
+#: src/gui.rs:1585
 msgid "The scan file no longer exists: {path}"
 msgstr ""
 
-#: src/gui.rs:1508 src/gui.rs:1631
+#: src/gui.rs:1618 src/gui.rs:1741
 msgid "Unknown file"
 msgstr ""
 
-#: src/gui.rs:1517
+#: src/gui.rs:1627
 msgid "No file could be processed:\n"
 "{errors}"
 msgstr ""
 
-#: src/gui.rs:1523 src/gui.rs:2139
+#: src/gui.rs:1633 src/gui.rs:2304
 msgid "\n"
 "Errors:\n"
 ""
 msgstr ""
 
-#: src/gui.rs:1528
+#: src/gui.rs:1638
 msgid "Saved {photos} photo(s) from {files} file(s)"
 msgstr ""
 
-#: src/gui.rs:1589
+#: src/gui.rs:1699
 msgid "Could not stage the review photo"
 msgstr ""
 
-#: src/gui.rs:1604
+#: src/gui.rs:1714
 msgid "No sufficiently large photos were detected"
 msgstr ""
 
-#: src/gui.rs:1639
+#: src/gui.rs:1749
 msgid "No file could be prepared for review:\n"
 "{errors}"
 msgstr ""
 
-#: src/gui.rs:1676
+#: src/gui.rs:1786
 msgid "Could not save the thumbnail"
 msgstr ""
 
-#: src/gui.rs:1733
+#: src/gui.rs:1843
 msgid "Scanning… {percent}%"
 msgstr ""
 
-#: src/gui.rs:1782 src/gui.rs:1786
+#: src/gui.rs:1892 src/gui.rs:1896
 msgid "No scanner detected"
 msgstr ""
 
-#: src/gui.rs:1794
+#: src/gui.rs:1904
 msgid "Scanner ready"
 msgstr ""
 
-#: src/gui.rs:1819
+#: src/gui.rs:1929
 msgid "{count} photo(s) detected – please review"
 msgstr ""
 
-#: src/gui.rs:1829 src/gui.rs:1867
+#: src/gui.rs:1939 src/gui.rs:1977
 msgid "Operation cancelled"
 msgstr ""
 
-#: src/gui.rs:1831
+#: src/gui.rs:1941
 msgid "Review could not be prepared"
 msgstr ""
 
-#: src/gui.rs:1852
+#: src/gui.rs:1962
 msgid "Scan preview"
 msgstr ""
 
-#: src/gui.rs:1869
+#: src/gui.rs:1979
 msgid "Operation failed"
 msgstr ""
 
-#: src/gui.rs:1885 src/gui.rs:1972
+#: src/gui.rs:1996
+msgid "{count} photo detected"
+msgid_plural "{count} photos detected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gui.rs:2002 src/gui.rs:2122
 msgid "Save {count} photo"
 msgid_plural "Save {count} photos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/gui.rs:1937
-msgid "Save photo {number}"
+#: src/gui.rs:2065
+msgid "Photo {number}"
 msgstr ""
 
-#: src/gui.rs:1944
-msgid "Rotate 90° clockwise"
+#: src/gui.rs:2072
+msgid "Include photo {number} in the export"
 msgstr ""
 
-#: src/gui.rs:2025
+#: src/gui.rs:2078 src/gui.rs:2085
+msgid "Rotate photo {number} 90° clockwise"
+msgstr ""
+
+#: src/gui.rs:2155
+msgid "{selected} of {total} selected"
+msgstr ""
+
+#: src/gui.rs:2190
 msgid "Review discarded"
 msgstr ""
 
-#: src/gui.rs:2054
+#: src/gui.rs:2219
 msgid "Select at least one photo to save."
 msgstr ""
 
-#: src/gui.rs:2073
+#: src/gui.rs:2238
 msgid "Saving {count} photo(s)…"
 msgstr ""
 
-#: src/gui.rs:2112
+#: src/gui.rs:2277
 msgid "Review photo contains no image data: {path}"
 msgstr ""
 
-#: src/gui.rs:2135
+#: src/gui.rs:2300
 msgid "No photo selected for saving"
 msgstr ""
 
-#: src/gui.rs:2255
+#: src/gui.rs:2420
 msgid "Could not save settings: {error}"
 msgstr ""
 
-#: src/gui.rs:2306
+#: src/gui.rs:2471
 msgid "Details"
 msgstr ""
 
-#: src/gui.rs:2341
+#: src/gui.rs:2506
 msgid "Error details"
 msgstr ""
 
-#: src/gui.rs:2343
+#: src/gui.rs:2508
 msgid "Close"
 msgstr ""
 
-#: src/gui.rs:2376
+#: src/gui.rs:2541
 msgid "Cancellation requested…"
 msgstr ""
 
-#: src/gui.rs:2396
+#: src/gui.rs:2561
 msgid "Could not read preview: {path}"
 msgstr ""
 
-#: src/gui.rs:2402
+#: src/gui.rs:2567
 msgid "Preview contains no image data: {path}"
 msgstr ""
 
-#: src/gui.rs:2424
+#: src/gui.rs:2589
 msgid "Could not save the preview file"
 msgstr ""
 

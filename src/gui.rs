@@ -70,6 +70,8 @@ struct Ui {
     picture: gtk::Picture,
     preview_scroller: gtk::ScrolledWindow,
     review_overview: gtk::Picture,
+    review_detected_label: gtk::Label,
+    review_selection_label: gtk::Label,
     review_flow: gtk::FlowBox,
     review_save_button: gtk::Button,
     zoom: Rc<Cell<f64>>,
@@ -497,6 +499,8 @@ fn build_window(application: &adw::Application) {
         picture,
         preview_scroller,
         review_overview,
+        review_detected_label,
+        review_selection_label,
         review_flow,
         review_save_button,
     ) = build_preview();
@@ -542,6 +546,8 @@ fn build_window(application: &adw::Application) {
         picture,
         preview_scroller,
         review_overview,
+        review_detected_label,
+        review_selection_label,
         review_flow,
         review_save_button,
         zoom,
@@ -751,6 +757,8 @@ fn build_preview() -> (
     gtk::Picture,
     gtk::ScrolledWindow,
     gtk::Picture,
+    gtk::Label,
+    gtk::Label,
     gtk::FlowBox,
     gtk::Button,
 ) {
@@ -769,9 +777,72 @@ fn build_preview() -> (
     let review_overview = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
         .can_shrink(true)
-        .height_request(280)
         .hexpand(true)
+        .vexpand(true)
         .build();
+    review_overview.add_css_class("review-overview-image");
+    review_overview.update_property(&[
+        gtk::accessible::Property::Label(&tr("Scan overview")),
+        gtk::accessible::Property::Description(&tr(
+            "Green outlines show the detected areas in the original scan.",
+        )),
+    ]);
+
+    let overview_frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    overview_frame.set_overflow(gtk::Overflow::Hidden);
+    overview_frame.add_css_class("review-overview-frame");
+    let overview_height = adw::Clamp::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .maximum_size(130)
+        .tightening_threshold(130)
+        .child(&review_overview)
+        .build();
+    let overview_size = adw::Clamp::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .maximum_size(150)
+        .tightening_threshold(150)
+        .child(&overview_height)
+        .build();
+    overview_frame.append(&overview_size);
+
+    let overview_title = gtk::Label::builder()
+        .label(tr("Scan overview"))
+        .xalign(0.0)
+        .build();
+    overview_title.add_css_class("heading");
+    let review_detected_label = gtk::Label::builder().xalign(0.0).wrap(true).build();
+    review_detected_label.add_css_class("title-3");
+    let overview_description = gtk::Label::builder()
+        .label(tr(
+            "Green outlines show the detected areas in the original scan.",
+        ))
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(38)
+        .build();
+    overview_description.add_css_class("dim-label");
+    let overview_copy = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    overview_copy.set_valign(gtk::Align::Center);
+    overview_copy.set_hexpand(true);
+    overview_copy.append(&overview_title);
+    overview_copy.append(&review_detected_label);
+    overview_copy.append(&overview_description);
+
+    let overview_card = adw::WrapBox::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .child_spacing(20)
+        .line_spacing(16)
+        .natural_line_length(650)
+        .wrap_policy(adw::WrapPolicy::Natural)
+        .build();
+    overview_card.set_margin_top(4);
+    overview_card.set_margin_bottom(4);
+    overview_card.set_margin_start(4);
+    overview_card.set_margin_end(4);
+    overview_card.add_css_class("review-overview-card");
+    overview_card.append(&overview_frame);
+    overview_card.append(&overview_copy);
+
     let review_flow = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .row_spacing(12)
@@ -779,6 +850,8 @@ fn build_preview() -> (
         .max_children_per_line(4)
         .min_children_per_line(1)
         .homogeneous(true)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Start)
         .build();
     let review_title = gtk::Label::builder()
         .label(tr("Review detected photos"))
@@ -786,32 +859,69 @@ fn build_preview() -> (
         .hexpand(true)
         .build();
     review_title.add_css_class("title-2");
+    let review_subtitle = gtk::Label::builder()
+        .label(tr("Review the selection and orientation before export."))
+        .xalign(0.0)
+        .wrap(true)
+        .build();
+    review_subtitle.add_css_class("dim-label");
+    let review_heading = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    review_heading.set_hexpand(true);
+    review_heading.append(&review_title);
+    review_heading.append(&review_subtitle);
     let review_save_button = gtk::Button::builder()
         .label(tr("Save photos"))
         .action_name("win.save-review")
         .build();
     review_save_button.add_css_class("suggested-action");
+    review_save_button.add_css_class("review-primary-action");
     let review_discard_button = gtk::Button::builder()
         .label(tr("Discard"))
         .action_name("win.discard-review")
         .build();
-    let review_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    review_actions.append(&review_title);
-    review_actions.append(&review_discard_button);
-    review_actions.append(&review_save_button);
-    let review_content = gtk::Box::new(gtk::Orientation::Vertical, 16);
-    review_content.set_margin_top(16);
-    review_content.set_margin_bottom(16);
-    review_content.set_margin_start(16);
-    review_content.set_margin_end(16);
-    review_content.append(&review_actions);
-    review_content.append(&review_overview);
+    let review_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    review_buttons.set_valign(gtk::Align::Center);
+    review_buttons.append(&review_discard_button);
+    review_buttons.append(&review_save_button);
+    let review_header = adw::WrapBox::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .child_spacing(16)
+        .line_spacing(12)
+        .natural_line_length(720)
+        .wrap_policy(adw::WrapPolicy::Natural)
+        .build();
+    review_header.add_css_class("review-header");
+    review_header.append(&review_heading);
+    review_header.append(&review_buttons);
+
+    let gallery_title = gtk::Label::builder()
+        .label(tr("Detected photos"))
+        .xalign(0.0)
+        .hexpand(true)
+        .build();
+    gallery_title.add_css_class("title-3");
+    let review_selection_label = gtk::Label::builder().xalign(1.0).build();
+    review_selection_label.add_css_class("review-selection-counter");
+    review_selection_label.set_accessible_role(gtk::AccessibleRole::Status);
+    let gallery_heading = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    gallery_heading.append(&gallery_title);
+    gallery_heading.append(&review_selection_label);
+
+    let review_content = gtk::Box::new(gtk::Orientation::Vertical, 20);
+    review_content.add_css_class("review-content");
+    review_content.append(&overview_card);
+    review_content.append(&gallery_heading);
     review_content.append(&review_flow);
-    let review_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
+    let review_clamp = adw::Clamp::builder()
+        .maximum_size(920)
+        .tightening_threshold(720)
         .child(&review_content)
         .build();
+    let review_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    review_page.add_css_class("review-page");
+    review_page.append(&review_header);
+    review_page.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    review_page.append(&review_clamp);
 
     let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
     empty.set_halign(gtk::Align::Center);
@@ -840,13 +950,15 @@ fn build_preview() -> (
         .build();
     stack.add_named(&empty, Some("empty"));
     stack.add_named(&scroller, Some("picture"));
-    stack.add_named(&review_scroller, Some("review"));
+    stack.add_named(&review_page, Some("review"));
     stack.set_visible_child_name("empty");
     (
         stack,
         picture,
         scroller,
         review_overview,
+        review_detected_label,
+        review_selection_label,
         review_flow,
         review_save_button,
     )
@@ -1880,11 +1992,18 @@ fn show_review(ui: &Ui, review: ReviewData) {
     drop_review(ui);
     ui.review_overview
         .set_file(Some(&gio::File::for_path(&review.overview)));
-    let included_count = Rc::new(Cell::new(review.photos.len()));
+    let photo_count = review.photos.len();
+    let included_count = Rc::new(Cell::new(photo_count));
+    ui.review_detected_label.set_label(&trn(
+        "{count} photo detected",
+        "{count} photos detected",
+        photo_count,
+    ));
+    update_review_selection_label(&ui.review_selection_label, photo_count, photo_count);
     ui.review_save_button.set_label(&trn(
         "Save {count} photo",
         "Save {count} photos",
-        review.photos.len(),
+        photo_count,
     ));
     let mut selections = Vec::with_capacity(review.photos.len());
     for (index, photo) in review.photos.iter().enumerate() {
@@ -1895,9 +2014,13 @@ fn show_review(ui: &Ui, review: ReviewData) {
             photo,
             &include,
             &quarter_turns,
-            &included_count,
-            &ui.review_save_button,
-            &ui.save_review_action,
+            ReviewCardControls {
+                included_count: &included_count,
+                total_count: photo_count,
+                selection_label: &ui.review_selection_label,
+                save_button: &ui.review_save_button,
+                save_action: &ui.save_review_action,
+            },
         );
         ui.review_flow.insert(&card, -1);
         selections.push(ReviewSelection {
@@ -1916,50 +2039,88 @@ fn show_review(ui: &Ui, review: ReviewData) {
     ui.window.set_default_widget(Some(&ui.review_save_button));
 }
 
+struct ReviewCardControls<'a> {
+    included_count: &'a Rc<Cell<usize>>,
+    total_count: usize,
+    selection_label: &'a gtk::Label,
+    save_button: &'a gtk::Button,
+    save_action: &'a gio::SimpleAction,
+}
+
 fn build_review_card(
     index: usize,
     photo: &ReviewPhotoData,
     include: &Rc<Cell<bool>>,
     quarter_turns: &Rc<Cell<u8>>,
-    included_count: &Rc<Cell<usize>>,
-    save_button: &gtk::Button,
-    save_action: &gio::SimpleAction,
-) -> gtk::Box {
+    context: ReviewCardControls<'_>,
+) -> adw::Clamp {
     let picture = gtk::Picture::builder()
         .file(&gio::File::for_path(&photo.thumbnail_path))
         .content_fit(gtk::ContentFit::Contain)
         .can_shrink(true)
-        .width_request(180)
-        .height_request(140)
+        .hexpand(true)
+        .vexpand(true)
         .build();
+    picture.add_css_class("review-photo");
+    let picture_frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    picture_frame.set_overflow(gtk::Overflow::Hidden);
+    picture_frame.add_css_class("review-photo-frame");
+    let picture_height = adw::Clamp::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .maximum_size(122)
+        .tightening_threshold(122)
+        .child(&picture)
+        .build();
+    let picture_size = adw::Clamp::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .maximum_size(184)
+        .tightening_threshold(184)
+        .child(&picture_height)
+        .build();
+    picture_frame.append(&picture_size);
     let check = gtk::CheckButton::builder()
         .label(tr_args(
-            "Save photo {number}",
+            "Photo {number}",
             &[("number", (index + 1).to_string())],
         ))
         .active(true)
+        .hexpand(true)
         .build();
+    check.update_property(&[gtk::accessible::Property::Description(&tr_args(
+        "Include photo {number} in the export",
+        &[("number", (index + 1).to_string())],
+    ))]);
     let rotate = gtk::Button::builder()
         .icon_name("object-rotate-right-symbolic")
-        .tooltip_text(tr("Rotate 90° clockwise"))
+        .tooltip_text(tr_args(
+            "Rotate photo {number} 90° clockwise",
+            &[("number", (index + 1).to_string())],
+        ))
+        .valign(gtk::Align::Center)
         .build();
-    rotate.add_css_class("flat");
+    rotate.add_css_class("circular");
+    rotate.update_property(&[gtk::accessible::Property::Label(&tr_args(
+        "Rotate photo {number} 90° clockwise",
+        &[("number", (index + 1).to_string())],
+    ))]);
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    controls.add_css_class("review-card-controls");
     controls.append(&check);
     controls.append(&rotate);
-    let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    card.set_margin_top(8);
-    card.set_margin_bottom(8);
-    card.set_margin_start(8);
-    card.set_margin_end(8);
-    card.add_css_class("card");
-    card.append(&picture);
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    card.set_overflow(gtk::Overflow::Hidden);
+    card.add_css_class("review-card");
+    card.add_css_class("included");
+    card.append(&picture_frame);
     card.append(&controls);
 
     let include_state = Rc::clone(include);
-    let count = Rc::clone(included_count);
-    let save_button = save_button.clone();
-    let save_action = save_action.clone();
+    let count = Rc::clone(context.included_count);
+    let save_button = context.save_button.clone();
+    let save_action = context.save_action.clone();
+    let selection_label = context.selection_label.clone();
+    let total_count = context.total_count;
+    let card_state = card.clone();
     check.connect_toggled(move |check| {
         let active = check.is_active();
         if include_state.replace(active) != active {
@@ -1969,8 +2130,16 @@ fn build_review_card(
                 count.get().saturating_sub(1)
             };
             count.set(next);
+            if active {
+                card_state.remove_css_class("excluded");
+                card_state.add_css_class("included");
+            } else {
+                card_state.remove_css_class("included");
+                card_state.add_css_class("excluded");
+            }
             save_button.set_label(&trn("Save {count} photo", "Save {count} photos", next));
             save_action.set_enabled(next > 0);
+            update_review_selection_label(&selection_label, next, total_count);
         }
     });
 
@@ -1996,7 +2165,24 @@ fn build_review_card(
     } else {
         rotate.set_sensitive(false);
     }
-    card
+    adw::Clamp::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .maximum_size(208)
+        .tightening_threshold(208)
+        .child(&card)
+        .build()
+}
+
+fn update_review_selection_label(label: &gtk::Label, selected: usize, total: usize) {
+    let text = tr_args(
+        "{selected} of {total} selected",
+        &[
+            ("selected", selected.to_string()),
+            ("total", total.to_string()),
+        ],
+    );
+    label.set_label(&text);
+    label.announce(&text, gtk::AccessibleAnnouncementPriority::Low);
 }
 
 fn drop_review(ui: &Ui) -> bool {
@@ -2009,6 +2195,8 @@ fn drop_review(ui: &Ui) -> bool {
     }
     ui.review_overview
         .set_paintable(None::<&gtk::gdk::Paintable>);
+    ui.review_detected_label.set_label("");
+    ui.review_selection_label.set_label("");
     ui.save_review_action.set_enabled(false);
     ui.discard_review_action.set_enabled(false);
     had_review
