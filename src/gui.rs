@@ -1705,7 +1705,7 @@ fn prepare_review(
     let mut photos = Vec::new();
     let mut groups = Vec::new();
     let mut failures = Vec::new();
-    let mut overview = None;
+    let mut overviews = Vec::new();
     for (source_index, source) in sources.iter().enumerate() {
         ensure_not_cancelled(cancellation)?;
         if let Some(status) = status.as_deref() {
@@ -1758,7 +1758,7 @@ fn prepare_review(
             Ok((analyzed, mut group_photos, overview_path)) => {
                 photos.append(&mut group_photos);
                 groups.push(ReviewGroup { analyzed });
-                overview = Some(overview_path);
+                overviews.push(overview_path);
             }
             Err(error) => {
                 if cancellation.is_cancelled() {
@@ -1774,12 +1774,13 @@ fn prepare_review(
         }
     }
     ensure_not_cancelled(cancellation)?;
-    let Some(overview) = overview else {
+    if overviews.is_empty() {
         bail!(tr_args(
             "No file could be prepared for review:\n{errors}",
             &[("errors", failures.join("\n"))],
         ));
-    };
+    }
+    let overview = compose_review_overviews(&overviews, staging.path())?;
     Ok(ReviewData {
         _staging: staging,
         photos,
@@ -1789,6 +1790,76 @@ fn prepare_review(
         output: output.to_path_buf(),
         failures,
     })
+}
+
+fn compose_review_overviews(overviews: &[PathBuf], directory: &Path) -> Result<PathBuf> {
+    const WIDTH: i32 = 1200;
+    const HEIGHT: i32 = 900;
+    const CELL_PADDING: i32 = 16;
+
+    match overviews {
+        [] => bail!(tr("No preview file was created")),
+        [overview] => return Ok(overview.clone()),
+        _ => {}
+    }
+
+    let columns = (overviews.len() as f64).sqrt().ceil() as i32;
+    let rows = overviews.len().div_ceil(columns as usize) as i32;
+    let cell_width = WIDTH / columns;
+    let cell_height = HEIGHT / rows;
+    let mut sheet = Mat::new_rows_cols_with_default(
+        HEIGHT,
+        WIDTH,
+        core::CV_8UC3,
+        core::Scalar::new(24.0, 24.0, 24.0, 0.0),
+    )?;
+
+    for (index, path) in overviews.iter().enumerate() {
+        let image = imgcodecs::imread(path, imgcodecs::IMREAD_COLOR).with_context(|| {
+            tr_args(
+                "Could not read preview: {path}",
+                &[("path", path.display().to_string())],
+            )
+        })?;
+        if image.empty() {
+            bail!(tr_args(
+                "Preview contains no image data: {path}",
+                &[("path", path.display().to_string())],
+            ));
+        }
+        let available_width = (cell_width - 2 * CELL_PADDING).max(1);
+        let available_height = (cell_height - 2 * CELL_PADDING).max(1);
+        let scale = (f64::from(available_width) / f64::from(image.cols()))
+            .min(f64::from(available_height) / f64::from(image.rows()));
+        let target_width = (f64::from(image.cols()) * scale).round().max(1.0) as i32;
+        let target_height = (f64::from(image.rows()) * scale).round().max(1.0) as i32;
+        let mut thumbnail = Mat::default();
+        imgproc::resize(
+            &image,
+            &mut thumbnail,
+            Size::new(target_width, target_height),
+            0.0,
+            0.0,
+            imgproc::INTER_AREA,
+        )?;
+
+        let column = index as i32 % columns;
+        let row = index as i32 / columns;
+        let x = column * cell_width + (cell_width - target_width) / 2;
+        let y = row * cell_height + (cell_height - target_height) / 2;
+        let mut destination = Mat::roi_mut(
+            &mut sheet,
+            core::Rect::new(x, y, target_width, target_height),
+        )?;
+        thumbnail.copy_to(&mut destination)?;
+    }
+
+    let path = directory.join("overview_batch.jpg");
+    let parameters = Vector::from_slice(&[imgcodecs::IMWRITE_JPEG_QUALITY, 88]);
+    if !imgcodecs::imwrite(&path, &sheet, &parameters)? {
+        bail!(tr("Could not save the preview file"));
+    }
+    Ok(path)
 }
 
 fn write_thumbnail(photo: &Mat, path: &Path) -> Result<()> {
@@ -2687,5 +2758,29 @@ mod tests {
 
         assert_eq!((clockwise.cols(), clockwise.rows()), (40, 90));
         assert_eq!((upside_down.cols(), upside_down.rows()), (90, 40));
+    }
+
+    #[test]
+    fn review_overview_contains_every_source() {
+        let directory = TempDir::new().unwrap();
+        let red_path = directory.path().join("red.png");
+        let green_path = directory.path().join("green.png");
+        let red =
+            Mat::new_rows_cols_with_default(90, 160, CV_8UC3, Scalar::new(0.0, 0.0, 255.0, 0.0))
+                .unwrap();
+        let green =
+            Mat::new_rows_cols_with_default(90, 160, CV_8UC3, Scalar::new(0.0, 255.0, 0.0, 0.0))
+                .unwrap();
+        assert!(imgcodecs::imwrite_def(&red_path, &red).unwrap());
+        assert!(imgcodecs::imwrite_def(&green_path, &green).unwrap());
+
+        let overview = compose_review_overviews(&[red_path, green_path], directory.path()).unwrap();
+        let image = imgcodecs::imread(&overview, imgcodecs::IMREAD_COLOR).unwrap();
+        let left = image.at_2d::<core::Vec3b>(450, 300).unwrap();
+        let right = image.at_2d::<core::Vec3b>(450, 900).unwrap();
+
+        assert_eq!((image.cols(), image.rows()), (1200, 900));
+        assert!(left[2] > 220 && left[1] < 30);
+        assert!(right[1] > 220 && right[2] < 30);
     }
 }
