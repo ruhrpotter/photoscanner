@@ -47,6 +47,7 @@ struct Ui {
     output_button: gtk::Button,
     scan_button: gtk::Button,
     import_button: gtk::Button,
+    cancel_button: gtk::Button,
     refresh_button: gtk::Button,
     spinner: gtk::Spinner,
     status_label: gtk::Label,
@@ -324,6 +325,17 @@ fn build_window(application: &adw::Application) {
         .hexpand(true)
         .build();
     import_button.add_css_class("primary-action");
+    let cancel_button = gtk::Button::builder()
+        .label("Abbrechen")
+        .icon_name("process-stop-symbolic")
+        .hexpand(true)
+        .visible(false)
+        .build();
+    cancel_button.add_css_class("destructive-action");
+    cancel_button.update_property(&[
+        gtk::accessible::Property::Label("Abbrechen"),
+        gtk::accessible::Property::KeyShortcuts("Escape"),
+    ]);
 
     let scan_action = gio::SimpleAction::new("scan", None);
     let import_action = gio::SimpleAction::new("import", None);
@@ -333,6 +345,7 @@ fn build_window(application: &adw::Application) {
     cancel_action.set_enabled(false);
     scan_button.set_action_name(Some("win.scan"));
     import_button.set_action_name(Some("win.import"));
+    cancel_button.set_action_name(Some("win.cancel"));
     refresh_button.set_action_name(Some("win.refresh"));
     output_button.set_action_name(Some("win.choose-output"));
     scan_button.update_property(&[gtk::accessible::Property::KeyShortcuts("F9")]);
@@ -367,6 +380,7 @@ fn build_window(application: &adw::Application) {
         output_button,
         scan_button,
         import_button,
+        cancel_button,
         refresh_button,
         spinner,
         status_label,
@@ -522,6 +536,7 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     let actions = gtk::Box::new(gtk::Orientation::Vertical, 8);
     actions.append(&ui.scan_button);
     actions.append(&ui.import_button);
+    actions.append(&ui.cancel_button);
     content.append(&actions);
 
     let status = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -1003,6 +1018,8 @@ fn request_devices(ui: &Ui) {
     let (operation_id, cancellation) = begin_operation(ui);
     ui.refresh_action.set_enabled(false);
     ui.scan_action.set_enabled(false);
+    ui.cancel_action.set_enabled(true);
+    ui.cancel_button.set_visible(true);
     set_status(
         ui,
         "Suche Scanner …",
@@ -1033,6 +1050,10 @@ fn handle_message(ui: &Ui, message: Message) {
     };
     if message_operation_id != ui.operation_id.get() {
         return;
+    }
+    if matches!(message, Message::Devices { .. }) {
+        ui.cancel_action.set_enabled(false);
+        ui.cancel_button.set_visible(false);
     }
     ui.cancellation.borrow_mut().take();
     ui.application_hold.borrow_mut().take();
@@ -1127,6 +1148,7 @@ fn set_busy(ui: &Ui, busy: bool, status: &str) {
     ui.refresh_action.set_enabled(!busy);
     ui.output_action.set_enabled(!busy);
     ui.cancel_action.set_enabled(busy);
+    ui.cancel_button.set_visible(busy);
     ui.device_dropdown.set_sensitive(!busy);
     ui.mode_dropdown.set_sensitive(!busy);
     ui.dpi_dropdown.set_sensitive(!busy);
