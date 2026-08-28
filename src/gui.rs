@@ -9,7 +9,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use anyhow::{Context, Result, anyhow, bail};
 use async_channel::Sender;
-use chrono::{Local, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate};
 use gtk::gio;
 use gtk::glib;
 use opencv::core::{Size, Vector};
@@ -299,6 +299,17 @@ fn build_window(application: &adw::Application) {
     date_entry.update_property(&[gtk::accessible::Property::Description(
         "Aufnahmedatum im Format Tag Punkt Monat Punkt Jahr",
     )]);
+    let calendar = gtk::Calendar::new();
+    let calendar_popover = gtk::Popover::builder().child(&calendar).build();
+    let calendar_button = gtk::MenuButton::builder()
+        .icon_name("x-office-calendar-symbolic")
+        .popover(&calendar_popover)
+        .valign(gtk::Align::Center)
+        .build();
+    calendar_button.add_css_class("flat");
+    calendar_button.update_property(&[gtk::accessible::Property::Label("Kalender öffnen")]);
+    date_entry.add_suffix(&calendar_button);
+    connect_date_picker(&date_entry, &calendar, &calendar_popover);
 
     let auto_threshold = gtk::Switch::builder()
         .active(persisted_settings.auto_threshold)
@@ -854,17 +865,11 @@ fn choose_import_file(ui: &Rc<Ui>) {
 fn collect_config(ui: &Ui, scanned: bool) -> Result<SplitConfig> {
     let capture_date = match NaiveDate::parse_from_str(ui.date_entry.text().trim(), "%d.%m.%Y") {
         Ok(date) => {
-            ui.date_entry
-                .update_state(&[gtk::accessible::State::Invalid(
-                    gtk::AccessibleInvalidState::False,
-                )]);
+            set_date_entry_validity(&ui.date_entry, true);
             date
         }
         Err(error) => {
-            ui.date_entry
-                .update_state(&[gtk::accessible::State::Invalid(
-                    gtk::AccessibleInvalidState::True,
-                )]);
+            set_date_entry_validity(&ui.date_entry, false);
             ui.date_entry.grab_focus();
             return Err(error).context("Aufnahmedatum muss als TT.MM.JJJJ angegeben werden");
         }
@@ -889,6 +894,70 @@ fn collect_config(ui: &Ui, scanned: bool) -> Result<SplitConfig> {
         capture_date: Some(capture_date),
         ..SplitConfig::default()
     })
+}
+
+fn connect_date_picker(entry: &adw::EntryRow, calendar: &gtk::Calendar, popover: &gtk::Popover) {
+    let entry_for_validation = entry.clone();
+    entry.connect_changed(move |_| {
+        let valid =
+            NaiveDate::parse_from_str(entry_for_validation.text().trim(), "%d.%m.%Y").is_ok();
+        set_date_entry_validity(&entry_for_validation, valid);
+    });
+    set_date_entry_validity(
+        entry,
+        NaiveDate::parse_from_str(entry.text().trim(), "%d.%m.%Y").is_ok(),
+    );
+
+    let selecting_date = Rc::new(Cell::new(false));
+    let entry_for_open = entry.clone();
+    let calendar_for_open = calendar.clone();
+    let selecting_for_open = Rc::clone(&selecting_date);
+    popover.connect_map(move |_| {
+        let Ok(date) = NaiveDate::parse_from_str(entry_for_open.text().trim(), "%d.%m.%Y") else {
+            return;
+        };
+        if let Ok(date_time) = glib::DateTime::from_local(
+            date.year(),
+            date.month() as i32,
+            date.day() as i32,
+            12,
+            0,
+            0.0,
+        ) {
+            selecting_for_open.set(true);
+            calendar_for_open.set_date(&date_time);
+            selecting_for_open.set(false);
+        }
+    });
+
+    let entry_for_selection = entry.clone();
+    let popover_for_selection = popover.clone();
+    calendar.connect_day_selected(move |calendar| {
+        if selecting_date.get() {
+            return;
+        }
+        let date = calendar.date();
+        entry_for_selection.set_text(&format!(
+            "{:02}.{:02}.{:04}",
+            date.day_of_month(),
+            date.month(),
+            date.year()
+        ));
+        popover_for_selection.popdown();
+    });
+}
+
+fn set_date_entry_validity(entry: &adw::EntryRow, valid: bool) {
+    entry.update_state(&[gtk::accessible::State::Invalid(if valid {
+        gtk::AccessibleInvalidState::False
+    } else {
+        gtk::AccessibleInvalidState::True
+    })]);
+    if valid {
+        entry.remove_css_class("error");
+    } else {
+        entry.add_css_class("error");
+    }
 }
 
 fn start_scan(ui: &Ui) {
