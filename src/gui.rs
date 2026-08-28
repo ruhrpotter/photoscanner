@@ -21,8 +21,10 @@ use photoscanner::scanner::{
     scan_to_file_cancellable,
 };
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
-use photoscanner::{APP_ID, APP_NAME, default_output_directory};
+use photoscanner::{APP_ID, APP_NAME};
 use tempfile::TempDir;
+
+use crate::gui_settings::PersistedSettings;
 
 const DEFAULT_STYLE: &str = include_str!("style.css");
 const PREVIEW_MAX_EDGE: i32 = 1600;
@@ -62,6 +64,8 @@ struct Ui {
     cancellation: Rc<RefCell<Option<ScannerCancellation>>>,
     application_hold: Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
     closing: Rc<Cell<bool>>,
+    settings_path: PathBuf,
+    last_capture_date: Rc<Cell<Option<NaiveDate>>>,
     preview_directory: Rc<RefCell<Option<TempDir>>>,
     theme_monitor: Rc<RefCell<Option<gio::FileMonitor>>>,
     scan_action: gio::SimpleAction,
@@ -87,6 +91,7 @@ struct WorkResult {
     detail: String,
     preview: PathBuf,
     preview_directory: TempDir,
+    capture_date: NaiveDate,
 }
 
 pub fn run() {
@@ -213,14 +218,17 @@ fn load_custom_theme(provider: &gtk::CssProvider, path: &Path) -> Result<()> {
 
 fn build_window(application: &adw::Application) {
     let (sender, receiver) = async_channel::bounded(8);
+    let settings_path = config_directory().join("settings.ini");
+    let persisted_settings = PersistedSettings::load(&settings_path);
     let devices = Rc::new(RefCell::new(Vec::new()));
-    let output_directory = Rc::new(RefCell::new(default_output_directory()));
+    let output_directory = Rc::new(RefCell::new(persisted_settings.output_directory.clone()));
     let busy = Rc::new(Cell::new(false));
     let discovery_pending = Rc::new(Cell::new(false));
     let operation_id = Rc::new(Cell::new(0));
     let cancellation = Rc::new(RefCell::new(None));
     let application_hold = Rc::new(RefCell::new(None));
     let closing = Rc::new(Cell::new(false));
+    let last_capture_date = Rc::new(Cell::new(persisted_settings.capture_date));
     let preview_directory = Rc::new(RefCell::new(None));
     let theme_monitor = Rc::new(RefCell::new(None));
 
@@ -253,26 +261,32 @@ fn build_window(application: &adw::Application) {
     let mode_dropdown = adw::ComboRow::builder()
         .title("Verarbeitung")
         .model(&mode_model)
-        .selected(0)
+        .selected(persisted_settings.mode_index)
         .build();
 
     let dpi_model = gtk::StringList::new(&["300 dpi", "600 dpi", "1200 dpi"]);
     let dpi_dropdown = adw::ComboRow::builder()
         .title("Auflösung")
         .model(&dpi_model)
-        .selected(1)
+        .selected(persisted_settings.dpi_index)
         .build();
 
     let format_model = gtk::StringList::new(&["JPG", "PNG", "TIFF"]);
     let format_dropdown = adw::ComboRow::builder()
         .title("Bildformat")
         .model(&format_model)
-        .selected(0)
+        .selected(persisted_settings.format_index)
         .build();
 
     let date_entry = adw::EntryRow::builder()
         .title("Aufnahmedatum")
-        .text(Local::now().format("%d.%m.%Y").to_string())
+        .text(
+            persisted_settings
+                .capture_date
+                .unwrap_or_else(|| Local::now().date_naive())
+                .format("%d.%m.%Y")
+                .to_string(),
+        )
         .input_purpose(gtk::InputPurpose::FreeForm)
         .build();
     date_entry.update_property(&[gtk::accessible::Property::Description(
@@ -280,21 +294,21 @@ fn build_window(application: &adw::Application) {
     )]);
 
     let auto_threshold = gtk::Switch::builder()
-        .active(true)
+        .active(persisted_settings.auto_threshold)
         .valign(gtk::Align::Center)
         .build();
     let threshold = gtk::SpinButton::with_range(1.0, 255.0, 1.0);
-    threshold.set_value(12.0);
+    threshold.set_value(persisted_settings.threshold);
     threshold.set_sensitive(false);
     threshold.set_valign(gtk::Align::Center);
     let min_area = gtk::SpinButton::with_range(0.1, 50.0, 0.1);
-    min_area.set_value(2.0);
+    min_area.set_value(persisted_settings.min_area);
     min_area.set_digits(1);
     let padding = gtk::SpinButton::with_range(0.0, 15.0, 0.1);
-    padding.set_value(1.2);
+    padding.set_value(persisted_settings.padding);
     padding.set_digits(1);
     let quality = gtk::SpinButton::with_range(1.0, 100.0, 1.0);
-    quality.set_value(95.0);
+    quality.set_value(persisted_settings.quality);
 
     let output_button = gtk::Button::builder()
         .label(short_path(&output_directory.borrow()))
@@ -397,6 +411,8 @@ fn build_window(application: &adw::Application) {
         cancellation,
         application_hold,
         closing,
+        settings_path,
+        last_capture_date,
         preview_directory,
         theme_monitor,
         scan_action,
@@ -427,17 +443,17 @@ fn build_window(application: &adw::Application) {
         }
     });
 
-    let cancellation = Rc::clone(&ui.cancellation);
-    let application_hold = Rc::clone(&ui.application_hold);
-    let closing = Rc::clone(&ui.closing);
-    let sender = ui.sender.clone();
+    let weak_ui = Rc::downgrade(&ui);
     ui.window.connect_close_request(move |_| {
-        closing.set(true);
-        if let Some(token) = cancellation.borrow().as_ref() {
-            token.cancel();
-        } else {
-            application_hold.borrow_mut().take();
-            sender.close();
+        if let Some(ui) = weak_ui.upgrade() {
+            save_settings(&ui);
+            ui.closing.set(true);
+            if let Some(token) = ui.cancellation.borrow().as_ref() {
+                token.cancel();
+            } else {
+                ui.application_hold.borrow_mut().take();
+                ui.sender.close();
+            }
         }
         glib::Propagation::Proceed
     });
@@ -918,6 +934,9 @@ fn scan_work(
             detail: path.display().to_string(),
             preview,
             preview_directory,
+            capture_date: config
+                .capture_date
+                .unwrap_or_else(|| Local::now().date_naive()),
         });
     }
     let result = split_scan(&source, output, config, None, true)?;
@@ -937,6 +956,9 @@ fn scan_work(
         ),
         preview,
         preview_directory,
+        capture_date: config
+            .capture_date
+            .unwrap_or_else(|| Local::now().date_naive()),
     })
 }
 
@@ -972,6 +994,9 @@ fn start_import(ui: &Ui, source: PathBuf) {
                         detail: path.display().to_string(),
                         preview,
                         preview_directory,
+                        capture_date: config
+                            .capture_date
+                            .unwrap_or_else(|| Local::now().date_naive()),
                     });
                 }
                 let result = split_scan(&source, &output, &config, None, true)?;
@@ -991,6 +1016,9 @@ fn start_import(ui: &Ui, source: PathBuf) {
                     ),
                     preview,
                     preview_directory,
+                    capture_date: config
+                        .capture_date
+                        .unwrap_or_else(|| Local::now().date_naive()),
                 })
             })()
             .map_err(|error| {
@@ -1111,6 +1139,8 @@ fn handle_message(ui: &Ui, message: Message) {
         Message::Work {
             result: Ok(result), ..
         } => {
+            ui.last_capture_date.set(Some(result.capture_date));
+            save_settings(ui);
             set_busy(ui, false, &result.title);
             set_status(
                 ui,
@@ -1140,6 +1170,24 @@ fn handle_message(ui: &Ui, message: Message) {
     }
     if work_message && ui.discovery_pending.get() {
         request_devices(ui);
+    }
+}
+
+fn save_settings(ui: &Ui) {
+    let settings = PersistedSettings {
+        output_directory: ui.output_directory.borrow().clone(),
+        dpi_index: ui.dpi_dropdown.selected(),
+        format_index: ui.format_dropdown.selected(),
+        mode_index: ui.mode_dropdown.selected(),
+        quality: ui.quality.value(),
+        min_area: ui.min_area.value(),
+        padding: ui.padding.value(),
+        auto_threshold: ui.auto_threshold.is_active(),
+        threshold: ui.threshold.value(),
+        capture_date: ui.last_capture_date.get(),
+    };
+    if let Err(error) = settings.save(&ui.settings_path) {
+        eprintln!("Einstellungen konnten nicht gespeichert werden: {error:#}");
     }
 }
 
