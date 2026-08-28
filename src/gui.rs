@@ -27,7 +27,7 @@ use tempfile::TempDir;
 use crate::gui_settings::PersistedSettings;
 
 const DEFAULT_STYLE: &str = include_str!("style.css");
-const PREVIEW_MAX_EDGE: i32 = 1600;
+const PREVIEW_MAX_EDGE: i32 = 3200;
 const CANCELLED_MESSAGE: &str = "Vorgang abgebrochen.";
 const WORKER_PANIC_MESSAGE: &str = "Interner Fehler im Hintergrundprozess.";
 
@@ -56,6 +56,8 @@ struct Ui {
     status_label: gtk::Label,
     preview_stack: gtk::Stack,
     picture: gtk::Picture,
+    preview_scroller: gtk::ScrolledWindow,
+    zoom: Rc<Cell<f64>>,
     devices: Rc<RefCell<Vec<ScannerDevice>>>,
     output_directory: Rc<RefCell<PathBuf>>,
     busy: Rc<Cell<bool>>,
@@ -75,6 +77,9 @@ struct Ui {
     refresh_action: gio::SimpleAction,
     output_action: gio::SimpleAction,
     cancel_action: gio::SimpleAction,
+    zoom_in_action: gio::SimpleAction,
+    zoom_out_action: gio::SimpleAction,
+    zoom_fit_action: gio::SimpleAction,
 }
 
 enum Message {
@@ -399,7 +404,15 @@ fn build_window(application: &adw::Application) {
         .hexpand(true)
         .build();
     status_label.set_accessible_role(gtk::AccessibleRole::Status);
-    let (preview_stack, picture) = build_preview();
+    let (preview_stack, picture, preview_scroller) = build_preview();
+    let zoom = Rc::new(Cell::new(0.0));
+
+    let zoom_in_action = gio::SimpleAction::new("zoom-in", None);
+    let zoom_out_action = gio::SimpleAction::new("zoom-out", None);
+    let zoom_fit_action = gio::SimpleAction::new("zoom-fit", None);
+    zoom_in_action.set_enabled(false);
+    zoom_out_action.set_enabled(false);
+    zoom_fit_action.set_enabled(false);
 
     let ui = Rc::new(Ui {
         window: window.clone(),
@@ -426,6 +439,8 @@ fn build_window(application: &adw::Application) {
         status_label,
         preview_stack,
         picture,
+        preview_scroller,
+        zoom,
         devices,
         output_directory,
         busy,
@@ -445,6 +460,9 @@ fn build_window(application: &adw::Application) {
         refresh_action,
         output_action,
         cancel_action,
+        zoom_in_action,
+        zoom_out_action,
+        zoom_fit_action,
     });
 
     split_view.set_sidebar(Some(&build_sidebar(&ui)));
@@ -612,12 +630,17 @@ fn row_with_suffix(
     row
 }
 
-fn build_preview() -> (gtk::Stack, gtk::Picture) {
+fn build_preview() -> (gtk::Stack, gtk::Picture, gtk::ScrolledWindow) {
     let picture = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
         .can_shrink(true)
         .hexpand(true)
         .vexpand(true)
+        .build();
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&picture)
         .build();
 
     let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -646,9 +669,9 @@ fn build_preview() -> (gtk::Stack, gtk::Picture) {
         .transition_duration(180)
         .build();
     stack.add_named(&empty, Some("empty"));
-    stack.add_named(&picture, Some("picture"));
+    stack.add_named(&scroller, Some("picture"));
     stack.set_visible_child_name("empty");
-    (stack, picture)
+    (stack, picture, scroller)
 }
 
 fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
@@ -672,6 +695,23 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
         gtk::accessible::Property::KeyShortcuts("F10"),
     ]);
     header.pack_start(&sidebar_button);
+    for (icon, tooltip, action) in [
+        (
+            "zoom-fit-best-symbolic",
+            "An Fenster anpassen",
+            "win.zoom-fit",
+        ),
+        ("zoom-out-symbolic", "Verkleinern", "win.zoom-out"),
+        ("zoom-in-symbolic", "Vergrößern", "win.zoom-in"),
+    ] {
+        let button = gtk::Button::builder()
+            .icon_name(icon)
+            .tooltip_text(tooltip)
+            .action_name(action)
+            .build();
+        button.add_css_class("icon-action");
+        header.pack_end(&button);
+    }
     toolbar.add_top_bar(&header);
 
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -776,6 +816,41 @@ fn connect_actions(ui: &Rc<Ui>) {
         }
     });
 
+    let weak_ui = Rc::downgrade(ui);
+    ui.zoom_in_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            zoom_preview(&ui, 1.25);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.zoom_out_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            zoom_preview(&ui, 1.0 / 1.25);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.zoom_fit_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            set_preview_zoom(&ui, 0.0);
+        }
+    });
+
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    let weak_ui = Rc::downgrade(ui);
+    scroll.connect_scroll(move |controller, _, dy| {
+        if !controller
+            .current_event_state()
+            .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+        {
+            return glib::Propagation::Proceed;
+        }
+        if let Some(ui) = weak_ui.upgrade() {
+            zoom_preview(&ui, if dy < 0.0 { 1.25 } else { 1.0 / 1.25 });
+        }
+        glib::Propagation::Stop
+    });
+    ui.preview_scroller.add_controller(scroll);
+
     ui.window.add_action(&ui.scan_action);
     ui.window.add_action(&ui.import_action);
     ui.window.add_action(&ui.refresh_action);
@@ -784,6 +859,9 @@ fn connect_actions(ui: &Rc<Ui>) {
     ui.window.add_action(&toggle_sidebar);
     ui.window.add_action(&close);
     ui.window.add_action(&error_details);
+    ui.window.add_action(&ui.zoom_in_action);
+    ui.window.add_action(&ui.zoom_out_action);
+    ui.window.add_action(&ui.zoom_fit_action);
 
     if let Some(application) = ui.window.application() {
         application.set_accels_for_action("win.scan", &["F9"]);
@@ -792,6 +870,9 @@ fn connect_actions(ui: &Rc<Ui>) {
         application.set_accels_for_action("win.choose-output", &["<Primary>l"]);
         application.set_accels_for_action("win.toggle-sidebar", &["F10"]);
         application.set_accels_for_action("win.cancel", &["Escape"]);
+        application.set_accels_for_action("win.zoom-in", &["<Primary>plus"]);
+        application.set_accels_for_action("win.zoom-out", &["<Primary>minus"]);
+        application.set_accels_for_action("win.zoom-fit", &["<Primary>0"]);
         application.set_accels_for_action("win.close", &["<Primary>q"]);
     }
 }
@@ -1279,6 +1360,8 @@ fn handle_message(ui: &Ui, message: Message) {
             );
             ui.picture
                 .set_file(Some(&gio::File::for_path(&result.preview)));
+            set_preview_zoom(ui, 0.0);
+            set_zoom_actions_enabled(ui, true);
             ui.picture.update_property(&[
                 gtk::accessible::Property::Label("Scanvorschau"),
                 gtk::accessible::Property::Description(&result.title),
@@ -1301,6 +1384,77 @@ fn handle_message(ui: &Ui, message: Message) {
     if work_message && ui.discovery_pending.get() {
         request_devices(ui);
     }
+}
+
+fn set_zoom_actions_enabled(ui: &Ui, enabled: bool) {
+    ui.zoom_in_action.set_enabled(enabled);
+    ui.zoom_out_action.set_enabled(enabled);
+    ui.zoom_fit_action.set_enabled(enabled);
+}
+
+fn zoom_preview(ui: &Ui, factor: f64) {
+    if ui.picture.paintable().is_none() {
+        return;
+    }
+    let current = ui.zoom.get();
+    let base = if current == 0.0 { 1.0 } else { current };
+    set_preview_zoom(ui, (base * factor).clamp(0.25, 4.0));
+}
+
+fn set_preview_zoom(ui: &Ui, zoom: f64) {
+    ui.zoom.set(zoom);
+    if zoom == 0.0 {
+        ui.picture.set_size_request(-1, -1);
+        ui.picture.set_content_fit(gtk::ContentFit::Contain);
+        ui.picture.set_can_shrink(true);
+        ui.picture.set_hexpand(true);
+        ui.picture.set_vexpand(true);
+        ui.picture.set_halign(gtk::Align::Fill);
+        ui.picture.set_valign(gtk::Align::Fill);
+        return;
+    }
+    let Some(paintable) = ui.picture.paintable() else {
+        return;
+    };
+    let width = paintable.intrinsic_width();
+    let height = paintable.intrinsic_height();
+    if width <= 0 || height <= 0 {
+        return;
+    }
+
+    let horizontal = ui.preview_scroller.hadjustment();
+    let vertical = ui.preview_scroller.vadjustment();
+    let horizontal_center = adjustment_center(&horizontal);
+    let vertical_center = adjustment_center(&vertical);
+    ui.picture.set_hexpand(false);
+    ui.picture.set_vexpand(false);
+    ui.picture.set_halign(gtk::Align::Center);
+    ui.picture.set_valign(gtk::Align::Center);
+    ui.picture.set_can_shrink(false);
+    ui.picture.set_content_fit(gtk::ContentFit::Fill);
+    ui.picture.set_size_request(
+        (f64::from(width) * zoom).round().max(1.0) as i32,
+        (f64::from(height) * zoom).round().max(1.0) as i32,
+    );
+    glib::idle_add_local_once(move || {
+        restore_adjustment_center(&horizontal, horizontal_center);
+        restore_adjustment_center(&vertical, vertical_center);
+    });
+}
+
+fn adjustment_center(adjustment: &gtk::Adjustment) -> f64 {
+    let span = adjustment.upper() - adjustment.lower();
+    if span <= 0.0 {
+        0.5
+    } else {
+        ((adjustment.value() + adjustment.page_size() / 2.0 - adjustment.lower()) / span)
+            .clamp(0.0, 1.0)
+    }
+}
+
+fn restore_adjustment_center(adjustment: &gtk::Adjustment, center: f64) {
+    let span = adjustment.upper() - adjustment.lower();
+    adjustment.set_value(adjustment.lower() + center * span - adjustment.page_size() / 2.0);
 }
 
 fn save_settings(ui: &Ui) {
@@ -1491,8 +1645,8 @@ mod tests {
         let source_directory = TempDir::new().unwrap();
         let source = source_directory.path().join("large.png");
         let image = Mat::new_rows_cols_with_default(
-            1200,
-            2400,
+            2000,
+            4000,
             CV_8UC3,
             Scalar::new(40.0, 80.0, 120.0, 0.0),
         )
@@ -1503,7 +1657,7 @@ mod tests {
         assert!(preview.starts_with(owner.path()));
         let image = imgcodecs::imread(&preview, imgcodecs::IMREAD_COLOR).unwrap();
         assert_eq!(image.cols().max(image.rows()), PREVIEW_MAX_EDGE);
-        assert_eq!((image.cols(), image.rows()), (1600, 800));
+        assert_eq!((image.cols(), image.rows()), (3200, 1600));
     }
 
     #[test]
