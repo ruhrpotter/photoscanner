@@ -66,6 +66,7 @@ struct Ui {
     closing: Rc<Cell<bool>>,
     settings_path: PathBuf,
     last_capture_date: Rc<Cell<Option<NaiveDate>>>,
+    last_error: Rc<RefCell<Option<String>>>,
     preview_directory: Rc<RefCell<Option<TempDir>>>,
     theme_monitor: Rc<RefCell<Option<gio::FileMonitor>>>,
     scan_action: gio::SimpleAction,
@@ -229,6 +230,7 @@ fn build_window(application: &adw::Application) {
     let application_hold = Rc::new(RefCell::new(None));
     let closing = Rc::new(Cell::new(false));
     let last_capture_date = Rc::new(Cell::new(persisted_settings.capture_date));
+    let last_error = Rc::new(RefCell::new(None));
     let preview_directory = Rc::new(RefCell::new(None));
     let theme_monitor = Rc::new(RefCell::new(None));
 
@@ -413,6 +415,7 @@ fn build_window(application: &adw::Application) {
         closing,
         settings_path,
         last_capture_date,
+        last_error,
         preview_directory,
         theme_monitor,
         scan_action,
@@ -742,6 +745,14 @@ fn connect_actions(ui: &Rc<Ui>) {
         }
     });
 
+    let error_details = gio::SimpleAction::new("error-details", None);
+    let weak_ui = Rc::downgrade(ui);
+    error_details.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            show_error_details(&ui);
+        }
+    });
+
     ui.window.add_action(&ui.scan_action);
     ui.window.add_action(&ui.import_action);
     ui.window.add_action(&ui.refresh_action);
@@ -749,6 +760,7 @@ fn connect_actions(ui: &Rc<Ui>) {
     ui.window.add_action(&ui.cancel_action);
     ui.window.add_action(&toggle_sidebar);
     ui.window.add_action(&close);
+    ui.window.add_action(&error_details);
 
     if let Some(application) = ui.window.application() {
         application.set_accels_for_action("win.scan", &["F9"]);
@@ -1225,9 +1237,55 @@ fn set_busy(ui: &Ui, busy: bool, status: &str) {
 }
 
 fn show_error(ui: &Ui, message: &str) {
-    set_status(ui, message, gtk::AccessibleAnnouncementPriority::High);
-    ui.toast_overlay
-        .add_toast(adw::Toast::builder().title(message).timeout(6).build());
+    *ui.last_error.borrow_mut() = Some(message.to_string());
+    let summary = error_summary(message);
+    ui.status_label.set_label(&summary);
+    ui.status_label
+        .announce(message, gtk::AccessibleAnnouncementPriority::High);
+    let mut toast = adw::Toast::builder().title(&summary).timeout(6);
+    if summary != message {
+        toast = toast
+            .button_label("Details")
+            .action_name("win.error-details");
+    }
+    ui.toast_overlay.add_toast(toast.build());
+}
+
+fn error_summary(message: &str) -> String {
+    const MAX_CHARS: usize = 120;
+    let first_line = message.lines().next().unwrap_or_default();
+    if first_line.chars().count() <= MAX_CHARS {
+        return first_line.to_string();
+    }
+    let mut summary = first_line.chars().take(MAX_CHARS - 1).collect::<String>();
+    summary.push('…');
+    summary
+}
+
+fn show_error_details(ui: &Ui) {
+    let Some(message) = ui.last_error.borrow().clone() else {
+        return;
+    };
+    let label = gtk::Label::builder()
+        .label(message)
+        .selectable(true)
+        .wrap(true)
+        .xalign(0.0)
+        .yalign(0.0)
+        .build();
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .max_content_height(360)
+        .propagate_natural_height(true)
+        .child(&label)
+        .build();
+    let dialog = adw::AlertDialog::new(Some("Fehlerdetails"), None);
+    dialog.set_extra_child(Some(&scroll));
+    dialog.add_response("close", "Schließen");
+    dialog.set_close_response("close");
+    dialog.set_default_response(Some("close"));
+    dialog.present(Some(&ui.window));
 }
 
 fn set_status(ui: &Ui, message: &str, priority: gtk::AccessibleAnnouncementPriority) {
@@ -1326,5 +1384,14 @@ mod tests {
         let image = imgcodecs::imread(&preview, imgcodecs::IMREAD_COLOR).unwrap();
         assert_eq!(image.cols().max(image.rows()), PREVIEW_MAX_EDGE);
         assert_eq!((image.cols(), image.rows()), (1600, 800));
+    }
+
+    #[test]
+    fn error_summary_uses_first_line_and_limits_length() {
+        assert_eq!(error_summary("Kurz\nTechnische Details"), "Kurz");
+        let long = "x".repeat(140);
+        let summary = error_summary(&long);
+        assert_eq!(summary.chars().count(), 120);
+        assert!(summary.ends_with('…'));
     }
 }
