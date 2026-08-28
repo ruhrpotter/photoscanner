@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photoscanner 0.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 06:19+0000\n"
+"POT-Creation-Date: 2026-08-28 06:21+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -598,98 +598,94 @@ msgstr ""
 msgid "unknown error"
 msgstr ""
 
-#: src/splitter.rs:51
+#: src/splitter.rs:52
 msgid "The input file does not exist: {path}"
 msgstr ""
 
-#: src/splitter.rs:55
+#: src/splitter.rs:56
 msgid "The image could not be processed: {error}"
 msgstr ""
 
-#: src/splitter.rs:59
+#: src/splitter.rs:60
 msgid "File operation failed: {error}"
 msgstr ""
 
-#: src/splitter.rs:63
+#: src/splitter.rs:64
 msgid "Image metadata could not be processed: {detail}"
 msgstr ""
 
-#: src/splitter.rs:67
+#: src/splitter.rs:68
 msgid "No individual photos were detected. Leave space between the photos or try a lower threshold."
 msgstr ""
 
-#: src/splitter.rs:69
+#: src/splitter.rs:70
 msgid "The selected capture date is invalid in the local time zone."
 msgstr ""
 
-#: src/splitter.rs:139
+#: src/splitter.rs:140
 msgid "Supported formats are JPG, PNG and TIFF."
 msgstr ""
 
-#: src/splitter.rs:186
+#: src/splitter.rs:187
 msgid "Minimum area must be between 0.1 and 50 percent."
 msgstr ""
 
-#: src/splitter.rs:194
+#: src/splitter.rs:195
 msgid "Threshold must be between 1 and 255."
 msgstr ""
 
-#: src/splitter.rs:199
+#: src/splitter.rs:200
 msgid "Padding must be between 0 and 15 percent."
 msgstr ""
 
-#: src/splitter.rs:204
+#: src/splitter.rs:205
 msgid "Maximum detection size must be between {minimum} and {maximum} pixels."
 msgstr ""
 
-#: src/splitter.rs:213
+#: src/splitter.rs:214
 msgid "JPEG quality must be between 1 and 100."
 msgstr ""
 
-#: src/splitter.rs:230
+#: src/splitter.rs:231
 msgid "The file prefix must be exactly one safe file name with at most {maximum} bytes."
 msgstr ""
 
-#: src/splitter.rs:240
+#: src/splitter.rs:241
 msgid "The image dimensions are invalid."
 msgstr ""
 
-#: src/splitter.rs:243
+#: src/splitter.rs:244
 msgid "The scanned image is too small or has an invalid format."
 msgstr ""
 
-#: src/splitter.rs:248
+#: src/splitter.rs:249
 msgid "The image is too large at {width}×{height} pixels. At most {maximum_pixels} pixels and {maximum_edge} pixels per edge are allowed."
 msgstr ""
 
-#: src/splitter.rs:407
+#: src/splitter.rs:408
 msgid "The image header could not be read: {error}"
 msgstr ""
 
-#: src/splitter.rs:426
+#: src/splitter.rs:427
 msgid "Image dimensions could not be verified safely before loading. PNG, JPEG and TIFF are supported."
 msgstr ""
 
-#: src/splitter.rs:543
+#: src/splitter.rs:544
 msgid "The scanned image has an invalid format or inconsistent dimensions."
 msgstr ""
 
-#: src/splitter.rs:909
+#: src/splitter.rs:910
 msgid "Publishing failed ({publish_error}); rollback also failed ({rollback_error})"
 msgstr ""
 
-#: src/splitter.rs:945
+#: src/splitter.rs:946
 msgid "No available file name could be determined."
 msgstr ""
 
-#: src/splitter.rs:1069
+#: src/splitter.rs:1070
 msgid "The image could not be saved: {path}"
 msgstr ""
 
-#: src/splitter.rs:1281
+#: src/splitter.rs:1282
 msgid "Exactly one preview region must be supplied for each exported photo."
-msgstr ""
-
-#: src/splitter.rs:1309
-msgid "preview"
 msgstr ""

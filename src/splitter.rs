@@ -23,6 +23,7 @@ const MAX_INPUT_PIXELS: u64 = 180_000_000;
 const MAX_IMAGE_HEADER_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PREFIX_BYTES: usize = 128;
 const MAX_PREVIEW_SIZE: i32 = 2000;
+const PREVIEW_SUFFIX: &str = "preview";
 
 #[derive(Debug)]
 /// Fehler bei der Validierung, Bildanalyse oder Veröffentlichung von Scans.
@@ -1306,7 +1307,7 @@ pub fn export_photos(
     if let Some(regions) = preview_regions {
         staged.push(StagedOutput {
             temporary: stage_preview(&analyzed.image, regions, output_directory, captured_at)?,
-            stem: format!("{base}_{}", tr("preview")),
+            stem: format!("{base}_{PREVIEW_SUFFIX}"),
             extension: "jpg",
         });
     }
@@ -1533,6 +1534,10 @@ mod tests {
         assert_eq!(
             result.files[1].file_name().unwrap().to_string_lossy(),
             "auswahl_02.png"
+        );
+        assert_eq!(
+            result.preview.as_ref().unwrap().file_name().unwrap(),
+            "auswahl_preview.jpg"
         );
         let expected_path = root.path().join("expected.jpg");
         save_preview(

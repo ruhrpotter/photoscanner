@@ -514,6 +514,3 @@ msgstr "Das Bild konnte nicht gespeichert werden: {path}"
 
 msgid "Exactly one preview region must be supplied for each exported photo."
 msgstr "Für jedes exportierte Foto muss genau ein Vorschaubereich angegeben werden."
-
-msgid "preview"
-msgstr "vorschau"
