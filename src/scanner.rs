@@ -10,8 +10,9 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
 use wait_timeout::ChildExt;
+
+use crate::i18n::{tr, tr_args};
 
 /// Maximale Wartezeit für die vollständige SANE-Gerätesuche.
 ///
@@ -41,41 +42,75 @@ impl ScannerProgram {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 /// Fehler beim Erkennen von Scannern oder beim Ausführen eines Scans.
 pub enum ScannerError {
     /// Das Programm `scanimage` ist nicht installiert oder nicht auffindbar.
-    #[error(
-        "SANE ist nicht installiert: Das Programm 'scanimage' wurde nicht gefunden. Unter CachyOS/Arch kann es mit 'sudo pacman -S sane sane-airscan' installiert werden."
-    )]
     ScanimageMissing,
     /// Die Gerätesuche hat ihr Zeitlimit überschritten.
-    #[error("Die Scannersuche hat zu lange gedauert.")]
     DeviceTimeout,
     /// SANE hat die Gerätesuche mit einer Fehlermeldung beendet.
-    #[error("Scanner konnten nicht abgefragt werden: {0}")]
     DeviceQuery(String),
     /// Die angeforderte Auflösung liegt außerhalb des zulässigen Bereichs.
-    #[error("Die Auflösung muss zwischen 75 und 2400 dpi liegen.")]
     InvalidDpi,
     /// Der Scan hat sein Zeitlimit überschritten.
-    #[error("Der Scan hat das Zeitlimit überschritten.")]
     ScanTimeout,
     /// Der aufrufende Thread hat den laufenden Scannerprozess abgebrochen.
-    #[error("Der Vorgang wurde abgebrochen.")]
     Cancelled,
     /// `scanimage` hat den Scan mit einer Fehlermeldung beendet.
-    #[error("Der Scan ist fehlgeschlagen: {0}")]
     ScanFailed(String),
     /// `scanimage` wurde erfolgreich beendet, hat aber keine Daten geliefert.
-    #[error("Der Scanner hat keine Bilddaten geliefert.")]
     EmptyScan,
     /// Die atomare Veröffentlichung wurde abgelehnt, weil das Ziel existiert.
-    #[error("Die Zieldatei existiert bereits: {}", .0.display())]
     DestinationExists(PathBuf),
     /// Der Scannerprozess oder eine zugehörige Dateioperation ist fehlgeschlagen.
-    #[error("Scannerprozess konnte nicht gestartet werden: {0}")]
-    Process(#[from] std::io::Error),
+    Process(std::io::Error),
+}
+
+impl std::fmt::Display for ScannerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::ScanimageMissing => tr(
+                "SANE is not installed: The 'scanimage' program was not found. Install it with your package manager (e.g. 'sudo pacman -S sane sane-airscan' on Arch).",
+            ),
+            Self::DeviceTimeout => tr("Scanner discovery timed out."),
+            Self::DeviceQuery(detail) => tr_args(
+                "Scanners could not be queried: {detail}",
+                &[("detail", detail.clone())],
+            ),
+            Self::InvalidDpi => tr("Resolution must be between 75 and 2400 dpi."),
+            Self::ScanTimeout => tr("The scan timed out."),
+            Self::Cancelled => tr("The operation was cancelled."),
+            Self::ScanFailed(detail) => {
+                tr_args("The scan failed: {detail}", &[("detail", detail.clone())])
+            }
+            Self::EmptyScan => tr("The scanner returned no image data."),
+            Self::DestinationExists(path) => tr_args(
+                "The destination file already exists: {path}",
+                &[("path", path.display().to_string())],
+            ),
+            Self::Process(error) => tr_args(
+                "The scanner process could not be started: {error}",
+                &[("error", error.to_string())],
+            ),
+        };
+        formatter.write_str(&message)
+    }
+}
+
+impl std::error::Error for ScannerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Process(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ScannerError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Process(error)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -316,7 +351,7 @@ fn parse_progress(value: &str) -> Option<f64> {
 fn join_reader(reader: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, ScannerError> {
     reader
         .join()
-        .map_err(|_| ScannerError::Process(io::Error::other("Pipe-Lesethread abgebrochen")))?
+        .map_err(|_| ScannerError::Process(io::Error::other(tr("Pipe reader thread aborted"))))?
         .map_err(ScannerError::Process)
 }
 
@@ -425,7 +460,7 @@ fn list_devices_with_program(
     if !result.status.success() {
         let detail = String::from_utf8_lossy(&result.stderr).trim().to_string();
         return Err(ScannerError::DeviceQuery(if detail.is_empty() {
-            "unbekannter SANE-Fehler".to_string()
+            tr("unknown SANE error")
         } else {
             detail
         }));
@@ -558,7 +593,7 @@ fn scan_to_file_with_program(
         let stderr = String::from_utf8_lossy(&stderr);
         let detail = stderr.trim();
         return Err(ScannerError::ScanFailed(if detail.is_empty() {
-            "unbekannter Fehler".to_string()
+            tr("unknown error")
         } else {
             detail.to_string()
         }));

@@ -1,11 +1,14 @@
 [Desktop Entry]
 Name=Photo Scanner
-Comment=Papierfotos scannen, erkennen und einzeln speichern
+Name[de]=Photo Scanner
+Comment=Scan, detect, and save paper photos individually
+Comment[de]=Papierfotos scannen, erkennen und einzeln speichern
 Exec=photoscanner gui
 Icon=de.martin.PhotoScanner
 Terminal=false
 Type=Application
 Categories=Graphics;Scanning;
-Keywords=Scanner;Fotos;PhotoPrism;SANE;Archiv;
+Keywords=Scanner;Photos;PhotoPrism;SANE;Archive;
+Keywords[de]=Scanner;Fotos;PhotoPrism;SANE;Archiv;
 StartupNotify=true
 StartupWMClass=de.martin.PhotoScanner

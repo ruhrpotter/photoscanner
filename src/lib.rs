@@ -9,6 +9,9 @@ use std::path::PathBuf;
 
 mod metadata;
 
+/// Laufzeitübersetzung und Locale-Initialisierung.
+pub mod i18n;
+
 /// SANE-Geräteerkennung und abbrechbare Scanprozesse.
 pub mod scanner;
 /// Fotoerkennung, Begradigung und Metadatenexport.

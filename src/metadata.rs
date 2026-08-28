@@ -5,24 +5,63 @@ use std::process::{Command, Output};
 
 use chrono::{DateTime, Local};
 use filetime::{FileTime, set_file_mtime};
-use thiserror::Error;
 
-#[derive(Debug, Error)]
+use crate::i18n::{tr, tr_args};
+
+#[derive(Debug)]
 pub(crate) enum MetadataError {
-    #[error(
-        "Das Programm 'exiv2' für Bildmetadaten wurde nicht gefunden. Unter CachyOS/Arch kann es mit 'sudo pacman -S exiv2' installiert werden."
-    )]
     ToolMissing,
-    #[error("Metadatenprozess konnte nicht ausgeführt werden: {0}")]
-    Process(#[source] io::Error),
-    #[error("Metadaten von '{path}' konnten nicht gelesen werden: {detail}")]
+    Process(io::Error),
     Read { path: PathBuf, detail: String },
-    #[error("Metadaten von '{path}' konnten nicht geschrieben werden: {detail}")]
     Write { path: PathBuf, detail: String },
-    #[error("Dateipfad für Metadaten konnte nicht aufgelöst werden: {0}")]
-    Path(#[source] io::Error),
-    #[error("Änderungsdatum konnte nicht gesetzt werden: {0}")]
-    FileTime(#[source] io::Error),
+    Path(io::Error),
+    FileTime(io::Error),
+}
+
+impl std::fmt::Display for MetadataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::ToolMissing => tr(
+                "The 'exiv2' image metadata program was not found. Install it with your package manager (e.g. 'sudo pacman -S exiv2' on Arch).",
+            ),
+            Self::Process(error) => tr_args(
+                "The metadata process could not be executed: {error}",
+                &[("error", error.to_string())],
+            ),
+            Self::Read { path, detail } => tr_args(
+                "Metadata from '{path}' could not be read: {detail}",
+                &[
+                    ("path", path.display().to_string()),
+                    ("detail", detail.clone()),
+                ],
+            ),
+            Self::Write { path, detail } => tr_args(
+                "Metadata for '{path}' could not be written: {detail}",
+                &[
+                    ("path", path.display().to_string()),
+                    ("detail", detail.clone()),
+                ],
+            ),
+            Self::Path(error) => tr_args(
+                "The metadata file path could not be resolved: {error}",
+                &[("error", error.to_string())],
+            ),
+            Self::FileTime(error) => tr_args(
+                "The modification date could not be set: {error}",
+                &[("error", error.to_string())],
+            ),
+        };
+        formatter.write_str(&message)
+    }
+}
+
+impl std::error::Error for MetadataError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Process(error) | Self::Path(error) | Self::FileTime(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 fn command_output(command: &mut Command) -> Result<Output, MetadataError> {
@@ -42,7 +81,10 @@ fn canonical_path(path: &Path) -> Result<PathBuf, MetadataError> {
 fn detail(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
-        format!("exiv2 wurde mit Status {} beendet", output.status)
+        tr_args(
+            "exiv2 exited with status {status}",
+            &[("status", output.status.to_string())],
+        )
     } else {
         stderr
     }

@@ -1,0 +1,493 @@
+# German translations for Photo Scanner.
+# This file is distributed under the same license as Photo Scanner.
+msgid ""
+msgstr ""
+"Project-Id-Version: photoscanner 0.2.0\n"
+"PO-Revision-Date: 2026-08-28 00:00+0200\n"
+"Last-Translator: Photo Scanner contributors\n"
+"Language-Team: German\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Using scanner: {scanner}"
+msgstr "Verwende Scanner: {scanner}"
+
+msgid "Scanning at {dpi} dpi ..."
+msgstr "Scanne mit {dpi} dpi ..."
+
+msgid "No scanner detected."
+msgstr "Kein Scanner erkannt."
+
+msgid "File: {path}"
+msgstr "Datei: {path}"
+
+msgid "Error processing {path}: {error}"
+msgstr "Fehler beim Verarbeiten von {path}: {error}"
+
+msgid "{failed} of {total} files could not be processed"
+msgstr "{failed} von {total} Dateien konnten nicht verarbeitet werden"
+
+msgid "The full scan could not be saved"
+msgstr "Der vollständige Scan konnte nicht gespeichert werden"
+
+msgid "Full scan saved:\n{path}"
+msgstr "Vollständiger Scan gespeichert:\n{path}"
+
+msgid "One photo saved:"
+msgid_plural "{count} photos saved:"
+msgstr[0] "Ein Foto gespeichert:"
+msgstr[1] "{count} Fotos gespeichert:"
+
+msgid "Preview: {path}"
+msgstr "Vorschau: {path}"
+
+msgid "Detection threshold: {threshold}"
+msgstr "Erkennungsschwellwert: {threshold}"
+
+msgid "Operation cancelled."
+msgstr "Vorgang abgebrochen."
+
+msgid "Internal background worker error."
+msgstr "Interner Fehler im Hintergrundprozess."
+
+msgid "Could not create the theme directory ({directory}): {error}"
+msgstr "Theme-Ordner konnte nicht angelegt werden ({directory}): {error}"
+
+msgid "The custom theme could not be installed."
+msgstr "Das benutzerdefinierte Theme konnte nicht installiert werden."
+
+msgid "Error in theme.css: {error}"
+msgstr "Fehler in theme.css: {error}"
+
+msgid "Theme changes cannot be monitored: {error}"
+msgstr "Theme-Änderungen können nicht überwacht werden: {error}"
+
+msgid "Could not read the theme: {path}"
+msgstr "Theme konnte nicht gelesen werden: {path}"
+
+msgid "Searching for scanners…"
+msgstr "Suche Scanner …"
+
+msgid "Scanner"
+msgstr "Scanner"
+
+msgid "Automatically separate photos"
+msgstr "Fotos automatisch trennen"
+
+msgid "Save the entire scan area"
+msgstr "Gesamte Scanfläche speichern"
+
+msgid "Processing"
+msgstr "Verarbeitung"
+
+msgid "Resolution"
+msgstr "Auflösung"
+
+msgid "Image format"
+msgstr "Bildformat"
+
+msgid "Capture date"
+msgstr "Aufnahmedatum"
+
+msgid "Capture date in day dot month dot year format"
+msgstr "Aufnahmedatum im Format Tag Punkt Monat Punkt Jahr"
+
+msgid "Open calendar"
+msgstr "Kalender öffnen"
+
+msgid "Search for scanners again"
+msgstr "Scanner neu suchen"
+
+msgid "Query SANE and AirScan devices again"
+msgstr "SANE- und AirScan-Geräte erneut abfragen"
+
+msgid "Start scan"
+msgstr "Scan starten"
+
+msgid "Open scan file"
+msgstr "Scandatei öffnen"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Ready to scan"
+msgstr "Bereit zum Scannen"
+
+msgid "Output folder"
+msgstr "Ausgabeordner"
+
+msgid "Digitize paper photos"
+msgstr "Papierfotos digitalisieren"
+
+msgid "Scan"
+msgstr "Scan"
+
+msgid "Refresh devices"
+msgstr "Geräte aktualisieren"
+
+msgid "Query SANE and AirScan again"
+msgstr "SANE und AirScan erneut abfragen"
+
+msgid "Review before saving"
+msgstr "Vor dem Speichern prüfen"
+
+msgid "Select and rotate detected photos"
+msgstr "Erkannte Fotos auswählen und drehen"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Folder"
+msgstr "Ordner"
+
+msgid "Photos and detection preview"
+msgstr "Fotos und Kontrollvorschau"
+
+msgid "JPEG quality"
+msgstr "JPEG-Qualität"
+
+msgid "Only for exported JPG photos"
+msgstr "Nur für exportierte JPG-Fotos"
+
+msgid "Detection"
+msgstr "Erkennung"
+
+msgid "Automatic detection is optimized for light scanner beds."
+msgstr "Die Automatik ist für helle Scannerflächen optimiert."
+
+msgid "Automatic threshold"
+msgstr "Schwellwert automatisch"
+
+msgid "Evaluate background noise along the edges"
+msgstr "Hintergrundrauschen am Rand auswerten"
+
+msgid "Manual threshold"
+msgstr "Manueller Schwellwert"
+
+msgid "Minimum area (%)"
+msgstr "Mindestfläche (%)"
+
+msgid "Ignore small dust and edge areas"
+msgstr "Kleine Staub- und Randflächen ignorieren"
+
+msgid "Additional margin (%)"
+msgstr "Zusätzlicher Rand (%)"
+
+msgid "Keep some space around each photo"
+msgstr "Etwas Fläche um jedes Foto erhalten"
+
+msgid "Review detected photos"
+msgstr "Erkannte Fotos prüfen"
+
+msgid "Save photos"
+msgstr "Fotos speichern"
+
+msgid "Discard"
+msgstr "Verwerfen"
+
+msgid "No preview yet"
+msgstr "Noch keine Vorschau"
+
+msgid "Start a scan or open an existing scan file."
+msgstr "Starte einen Scan oder öffne eine vorhandene Scandatei."
+
+msgid "Preview"
+msgstr "Vorschau"
+
+msgid "Detected photo boundaries"
+msgstr "Erkannte Fotogrenzen"
+
+msgid "Show or hide settings"
+msgstr "Einstellungen ein- oder ausblenden"
+
+msgid "Opens or closes the sidebar containing the scan settings"
+msgstr "Öffnet oder schließt die Seitenleiste mit den Scaneinstellungen"
+
+msgid "Fit to window"
+msgstr "An Fenster anpassen"
+
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+msgid "Select output folder"
+msgstr "Ausgabeordner auswählen"
+
+msgid "Images"
+msgstr "Bilder"
+
+msgid "Capture date must use the DD.MM.YYYY format"
+msgstr "Aufnahmedatum muss als TT.MM.JJJJ angegeben werden"
+
+msgid "No scanner is selected."
+msgstr "Es ist kein Scanner ausgewählt."
+
+msgid "Scanning at {dpi} dpi…"
+msgstr "Scanne mit {dpi} dpi …"
+
+msgid "Complete scan saved"
+msgstr "Vollständiger Scan gespeichert"
+
+msgid "No preview file was created"
+msgstr "Keine Vorschaudatei erzeugt"
+
+msgid "{count} photo saved"
+msgid_plural "{count} photos saved"
+msgstr[0] "{count} Foto gespeichert"
+msgstr[1] "{count} Fotos gespeichert"
+
+msgid "{output} · Threshold {threshold}"
+msgstr "{output} · Schwellwert {threshold}"
+
+msgid "Analyzing scan file…"
+msgstr "Analysiere Scandatei …"
+
+msgid "Analyzing file {index} of {total}…"
+msgstr "Analysiere Datei {index} von {total} …"
+
+msgid "The scan file no longer exists: {path}"
+msgstr "Die Scandatei existiert nicht mehr: {path}"
+
+msgid "Unknown file"
+msgstr "Unbekannte Datei"
+
+msgid "No file could be processed:\n{errors}"
+msgstr "Keine Datei konnte verarbeitet werden:\n{errors}"
+
+msgid "\nErrors:\n"
+msgstr "\nFehler:\n"
+
+msgid "Saved {photos} photo(s) from {files} file(s)"
+msgstr "{photos} Foto(s) aus {files} Datei(en) gespeichert"
+
+msgid "Could not stage the review photo"
+msgstr "Prüffoto konnte nicht zwischengespeichert werden"
+
+msgid "No sufficiently large photos were detected"
+msgstr "Keine ausreichend großen Fotos erkannt"
+
+msgid "No file could be prepared for review:\n{errors}"
+msgstr "Keine Datei konnte für die Prüfung vorbereitet werden:\n{errors}"
+
+msgid "Could not save the thumbnail"
+msgstr "Miniatur konnte nicht gespeichert werden"
+
+msgid "Scanning… {percent}%"
+msgstr "Scanne … {percent} %"
+
+msgid "No scanner detected"
+msgstr "Kein Scanner erkannt"
+
+msgid "Scanner ready"
+msgstr "Scanner bereit"
+
+msgid "{count} photo(s) detected – please review"
+msgstr "{count} Fotos erkannt – bitte prüfen"
+
+msgid "Operation cancelled"
+msgstr "Vorgang abgebrochen"
+
+msgid "Review could not be prepared"
+msgstr "Prüfung konnte nicht vorbereitet werden"
+
+msgid "Scan preview"
+msgstr "Scanvorschau"
+
+msgid "Operation failed"
+msgstr "Vorgang fehlgeschlagen"
+
+msgid "Save {count} photo"
+msgid_plural "Save {count} photos"
+msgstr[0] "{count} Foto speichern"
+msgstr[1] "{count} Fotos speichern"
+
+msgid "Save photo {number}"
+msgstr "Foto {number} speichern"
+
+msgid "Rotate 90° clockwise"
+msgstr "90° nach rechts drehen"
+
+msgid "Review discarded"
+msgstr "Prüfung verworfen"
+
+msgid "Select at least one photo to save."
+msgstr "Wähle mindestens ein Foto zum Speichern aus."
+
+msgid "Saving {count} photo(s)…"
+msgstr "Speichere {count} Fotos …"
+
+msgid "Review photo contains no image data: {path}"
+msgstr "Prüffoto enthält keine Bilddaten: {path}"
+
+msgid "No photo selected for saving"
+msgstr "Kein Foto zum Speichern ausgewählt"
+
+msgid "Could not save settings: {error}"
+msgstr "Einstellungen konnten nicht gespeichert werden: {error}"
+
+msgid "Details"
+msgstr "Details"
+
+msgid "Error details"
+msgstr "Fehlerdetails"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Cancellation requested…"
+msgstr "Abbruch angefordert …"
+
+msgid "Could not read preview: {path}"
+msgstr "Vorschau konnte nicht gelesen werden: {path}"
+
+msgid "Preview contains no image data: {path}"
+msgstr "Vorschau enthält keine Bilddaten: {path}"
+
+msgid "Could not save the preview file"
+msgstr "Vorschaudatei konnte nicht gespeichert werden"
+
+msgid "Could not create the settings folder: {path}"
+msgstr "Einstellungsordner konnte nicht angelegt werden: {path}"
+
+msgid "Could not save settings: {path}"
+msgstr "Einstellungen konnten nicht gespeichert werden: {path}"
+
+msgid "Error: {error}"
+msgstr "Fehler: {error}"
+
+msgid "The 'exiv2' image metadata program was not found. Install it with your package manager (e.g. 'sudo pacman -S exiv2' on Arch)."
+msgstr "Das Bildmetadaten-Programm 'exiv2' wurde nicht gefunden. Unter CachyOS/Arch kann es mit 'sudo pacman -S exiv2' installiert werden."
+
+msgid "The metadata process could not be executed: {error}"
+msgstr "Der Metadatenprozess konnte nicht ausgeführt werden: {error}"
+
+msgid "Metadata from '{path}' could not be read: {detail}"
+msgstr "Metadaten aus '{path}' konnten nicht gelesen werden: {detail}"
+
+msgid "Metadata for '{path}' could not be written: {detail}"
+msgstr "Metadaten für '{path}' konnten nicht geschrieben werden: {detail}"
+
+msgid "The metadata file path could not be resolved: {error}"
+msgstr "Der Dateipfad für die Metadaten konnte nicht aufgelöst werden: {error}"
+
+msgid "The modification date could not be set: {error}"
+msgstr "Das Änderungsdatum konnte nicht gesetzt werden: {error}"
+
+msgid "exiv2 exited with status {status}"
+msgstr "exiv2 wurde mit Status {status} beendet"
+
+msgid "SANE is not installed: The 'scanimage' program was not found. Install it with your package manager (e.g. 'sudo pacman -S sane sane-airscan' on Arch)."
+msgstr "SANE ist nicht installiert: Das Programm 'scanimage' wurde nicht gefunden. Unter CachyOS/Arch kann es mit 'sudo pacman -S sane sane-airscan' installiert werden."
+
+msgid "Scanner discovery timed out."
+msgstr "Die Gerätesuche hat ihr Zeitlimit überschritten."
+
+msgid "Scanners could not be queried: {detail}"
+msgstr "Scanner konnten nicht abgefragt werden: {detail}"
+
+msgid "Resolution must be between 75 and 2400 dpi."
+msgstr "Die Auflösung muss zwischen 75 und 2400 dpi liegen."
+
+msgid "The scan timed out."
+msgstr "Der Scan hat sein Zeitlimit überschritten."
+
+msgid "The operation was cancelled."
+msgstr "Der Vorgang wurde abgebrochen."
+
+msgid "The scan failed: {detail}"
+msgstr "Der Scan ist fehlgeschlagen: {detail}"
+
+msgid "The scanner returned no image data."
+msgstr "Der Scanner hat keine Bilddaten geliefert."
+
+msgid "The destination file already exists: {path}"
+msgstr "Die Zieldatei existiert bereits: {path}"
+
+msgid "The scanner process could not be started: {error}"
+msgstr "Der Scannerprozess konnte nicht gestartet werden: {error}"
+
+msgid "Pipe reader thread aborted"
+msgstr "Thread zum Lesen der Pipe wurde abgebrochen"
+
+msgid "unknown SANE error"
+msgstr "unbekannter SANE-Fehler"
+
+msgid "unknown error"
+msgstr "unbekannter Fehler"
+
+msgid "The input file does not exist: {path}"
+msgstr "Die Eingabedatei existiert nicht: {path}"
+
+msgid "The image could not be processed: {error}"
+msgstr "Das Bild konnte nicht verarbeitet werden: {error}"
+
+msgid "File operation failed: {error}"
+msgstr "Dateioperation fehlgeschlagen: {error}"
+
+msgid "Image metadata could not be processed: {detail}"
+msgstr "Bildmetadaten konnten nicht verarbeitet werden: {detail}"
+
+msgid "No individual photos were detected. Leave space between the photos or try a lower threshold."
+msgstr "Es wurden keine einzelnen Fotos erkannt. Lasse Abstand zwischen den Fotos oder versuche einen niedrigeren Schwellwert."
+
+msgid "The selected capture date is invalid in the local time zone."
+msgstr "Das ausgewählte Aufnahmedatum ist in der lokalen Zeitzone ungültig."
+
+msgid "Supported formats are JPG, PNG and TIFF."
+msgstr "Unterstützte Formate sind JPG, PNG und TIFF."
+
+msgid "Minimum area must be between 0.1 and 50 percent."
+msgstr "Die Mindestfläche muss zwischen 0,1 und 50 Prozent liegen."
+
+msgid "Threshold must be between 1 and 255."
+msgstr "Der Schwellwert muss zwischen 1 und 255 liegen."
+
+msgid "Padding must be between 0 and 15 percent."
+msgstr "Der Rand muss zwischen 0 und 15 Prozent liegen."
+
+msgid "Maximum detection size must be between {minimum} and {maximum} pixels."
+msgstr "Die maximale Erkennungsgröße muss zwischen {minimum} und {maximum} Pixeln liegen."
+
+msgid "JPEG quality must be between 1 and 100."
+msgstr "Die JPEG-Qualität muss zwischen 1 und 100 liegen."
+
+msgid "The file prefix must be exactly one safe file name with at most {maximum} bytes."
+msgstr "Das Dateipräfix muss genau ein sicherer Dateiname mit höchstens {maximum} Bytes sein."
+
+msgid "The image dimensions are invalid."
+msgstr "Die Bildabmessungen sind ungültig."
+
+msgid "The scanned image is too small or has an invalid format."
+msgstr "Das gescannte Bild ist zu klein oder hat ein ungültiges Format."
+
+msgid "The image is too large at {width}×{height} pixels. At most {maximum_pixels} pixels and {maximum_edge} pixels per edge are allowed."
+msgstr "Das Bild ist mit {width}×{height} Pixeln zu groß. Erlaubt sind höchstens {maximum_pixels} Pixel und {maximum_edge} Pixel pro Kante."
+
+msgid "The image header could not be read: {error}"
+msgstr "Der Bildheader konnte nicht gelesen werden: {error}"
+
+msgid "Image dimensions could not be verified safely before loading. PNG, JPEG and TIFF are supported."
+msgstr "Die Bildabmessungen konnten vor dem Laden nicht sicher geprüft werden. PNG, JPEG und TIFF werden unterstützt."
+
+msgid "The scanned image has an invalid format or inconsistent dimensions."
+msgstr "Das gescannte Bild hat ein ungültiges Format oder widersprüchliche Abmessungen."
+
+msgid "Publishing failed ({publish_error}); rollback also failed ({rollback_error})"
+msgstr "Veröffentlichen fehlgeschlagen ({publish_error}); auch das Zurückrollen ist fehlgeschlagen ({rollback_error})"
+
+msgid "No available file name could be determined."
+msgstr "Es konnte kein freier Dateiname ermittelt werden."
+
+msgid "The image could not be saved: {path}"
+msgstr "Das Bild konnte nicht gespeichert werden: {path}"
+
+msgid "Exactly one preview region must be supplied for each exported photo."
+msgstr "Für jedes exportierte Foto muss genau ein Vorschaubereich angegeben werden."
+
+msgid "preview"
+msgstr "vorschau"

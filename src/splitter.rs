@@ -13,7 +13,8 @@ use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
 use tempfile::{Builder as TempFileBuilder, NamedTempFile, TempPath};
-use thiserror::Error;
+
+use crate::i18n::{tr, tr_args};
 
 const MIN_DETECTION_SIZE: i32 = 256;
 const MAX_DETECTION_SIZE: i32 = 4096;
@@ -23,32 +24,74 @@ const MAX_IMAGE_HEADER_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PREFIX_BYTES: usize = 128;
 const MAX_PREVIEW_SIZE: i32 = 2000;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 /// Fehler bei der Validierung, Bildanalyse oder Veröffentlichung von Scans.
 pub enum SplitError {
     /// Eine Konfiguration oder Eingabeeigenschaft ist ungültig.
-    #[error("{0}")]
     InvalidConfig(String),
     /// Die angegebene Quelldatei existiert nicht.
-    #[error("Die Eingabedatei existiert nicht: {0}")]
     MissingSource(PathBuf),
     /// OpenCV konnte ein Bild nicht verarbeiten.
-    #[error("Bild konnte nicht verarbeitet werden: {0}")]
-    OpenCv(#[from] opencv::Error),
+    OpenCv(opencv::Error),
     /// Eine Dateisystemoperation ist fehlgeschlagen.
-    #[error("Dateioperation fehlgeschlagen: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
     /// Metadaten konnten nicht gelesen oder geschrieben werden.
-    #[error("Bildmetadaten konnten nicht verarbeitet werden: {0}")]
     Metadata(String),
     /// Im Scan wurde kein einzelnes Foto erkannt.
-    #[error(
-        "Keine einzelnen Fotos erkannt. Lege zwischen den Fotos Abstand frei oder versuche einen kleineren Schwellwert."
-    )]
     NothingDetected,
     /// Das Aufnahmedatum lässt sich in der lokalen Zeitzone nicht darstellen.
-    #[error("Das ausgewählte Aufnahmedatum ist in der lokalen Zeitzone ungültig.")]
     InvalidDate,
+}
+
+impl std::fmt::Display for SplitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::InvalidConfig(message) => message.clone(),
+            Self::MissingSource(path) => tr_args(
+                "The input file does not exist: {path}",
+                &[("path", path.display().to_string())],
+            ),
+            Self::OpenCv(error) => tr_args(
+                "The image could not be processed: {error}",
+                &[("error", error.to_string())],
+            ),
+            Self::Io(error) => tr_args(
+                "File operation failed: {error}",
+                &[("error", error.to_string())],
+            ),
+            Self::Metadata(detail) => tr_args(
+                "Image metadata could not be processed: {detail}",
+                &[("detail", detail.clone())],
+            ),
+            Self::NothingDetected => tr(
+                "No individual photos were detected. Leave space between the photos or try a lower threshold.",
+            ),
+            Self::InvalidDate => tr("The selected capture date is invalid in the local time zone."),
+        };
+        formatter.write_str(&message)
+    }
+}
+
+impl std::error::Error for SplitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::OpenCv(error) => Some(error),
+            Self::Io(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<opencv::Error> for SplitError {
+    fn from(error: opencv::Error) -> Self {
+        Self::OpenCv(error)
+    }
+}
+
+impl From<std::io::Error> for SplitError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,9 +135,9 @@ impl FromStr for OutputFormat {
             "jpg" | "jpeg" => Ok(Self::Jpeg),
             "png" => Ok(Self::Png),
             "tif" | "tiff" => Ok(Self::Tiff),
-            _ => Err(SplitError::InvalidConfig(
-                "Unterstützte Formate sind JPG, PNG und TIFF.".to_string(),
-            )),
+            _ => Err(SplitError::InvalidConfig(tr(
+                "Supported formats are JPG, PNG and TIFF.",
+            ))),
         }
     }
 }
@@ -139,32 +182,36 @@ impl SplitConfig {
     /// Prüft alle Werte gegen die unterstützten und ressourcensicheren Grenzen.
     pub fn validate(&self) -> Result<(), SplitError> {
         if !(0.1..=50.0).contains(&self.min_area_percent) {
-            return Err(SplitError::InvalidConfig(
-                "Die Mindestfläche muss zwischen 0,1 und 50 Prozent liegen.".to_string(),
-            ));
+            return Err(SplitError::InvalidConfig(tr(
+                "Minimum area must be between 0.1 and 50 percent.",
+            )));
         }
         if self
             .threshold
             .is_some_and(|value| !(1.0..=255.0).contains(&value))
         {
-            return Err(SplitError::InvalidConfig(
-                "Der Schwellwert muss zwischen 1 und 255 liegen.".to_string(),
-            ));
+            return Err(SplitError::InvalidConfig(tr(
+                "Threshold must be between 1 and 255.",
+            )));
         }
         if !(0.0..=15.0).contains(&self.padding_percent) {
-            return Err(SplitError::InvalidConfig(
-                "Der Rand muss zwischen 0 und 15 Prozent liegen.".to_string(),
-            ));
+            return Err(SplitError::InvalidConfig(tr(
+                "Padding must be between 0 and 15 percent.",
+            )));
         }
         if !(MIN_DETECTION_SIZE..=MAX_DETECTION_SIZE).contains(&self.max_detection_size) {
-            return Err(SplitError::InvalidConfig(format!(
-                "Die maximale Erkennungsgröße muss zwischen {MIN_DETECTION_SIZE} und {MAX_DETECTION_SIZE} Pixeln liegen."
+            return Err(SplitError::InvalidConfig(tr_args(
+                "Maximum detection size must be between {minimum} and {maximum} pixels.",
+                &[
+                    ("minimum", MIN_DETECTION_SIZE.to_string()),
+                    ("maximum", MAX_DETECTION_SIZE.to_string()),
+                ],
             )));
         }
         if !(1..=100).contains(&self.jpeg_quality) {
-            return Err(SplitError::InvalidConfig(
-                "Die JPEG-Qualität muss zwischen 1 und 100 liegen.".to_string(),
-            ));
+            return Err(SplitError::InvalidConfig(tr(
+                "JPEG quality must be between 1 and 100.",
+            )));
         }
         Ok(())
     }
@@ -179,8 +226,9 @@ fn validate_prefix(prefix: &str) -> Result<(), SplitError> {
         || prefix.chars().any(char::is_control)
         || prefix.contains('\\')
     {
-        return Err(SplitError::InvalidConfig(format!(
-            "Der Dateipräfix muss aus genau einem sicheren Dateinamen mit höchstens {MAX_PREFIX_BYTES} Bytes bestehen."
+        return Err(SplitError::InvalidConfig(tr_args(
+            "The file prefix must be exactly one safe file name with at most {maximum} bytes.",
+            &[("maximum", MAX_PREFIX_BYTES.to_string())],
         )));
     }
     Ok(())
@@ -189,17 +237,21 @@ fn validate_prefix(prefix: &str) -> Result<(), SplitError> {
 fn validate_image_dimensions(width: u32, height: u32) -> Result<(), SplitError> {
     let pixels = u64::from(width)
         .checked_mul(u64::from(height))
-        .ok_or_else(|| {
-            SplitError::InvalidConfig("Die Bildabmessungen sind ungültig.".to_string())
-        })?;
+        .ok_or_else(|| SplitError::InvalidConfig(tr("The image dimensions are invalid.")))?;
     if width < 20 || height < 20 {
-        return Err(SplitError::InvalidConfig(
-            "Das Scanbild ist zu klein oder hat ein ungültiges Format.".to_string(),
-        ));
+        return Err(SplitError::InvalidConfig(tr(
+            "The scanned image is too small or has an invalid format.",
+        )));
     }
     if width > MAX_INPUT_DIMENSION || height > MAX_INPUT_DIMENSION || pixels > MAX_INPUT_PIXELS {
-        return Err(SplitError::InvalidConfig(format!(
-            "Das Bild ist mit {width}×{height} Pixeln zu groß. Erlaubt sind höchstens {MAX_INPUT_PIXELS} Pixel und {MAX_INPUT_DIMENSION} Pixel je Kante."
+        return Err(SplitError::InvalidConfig(tr_args(
+            "The image is too large at {width}×{height} pixels. At most {maximum_pixels} pixels and {maximum_edge} pixels per edge are allowed.",
+            &[
+                ("width", width.to_string()),
+                ("height", height.to_string()),
+                ("maximum_pixels", MAX_INPUT_PIXELS.to_string()),
+                ("maximum_edge", MAX_INPUT_DIMENSION.to_string()),
+            ],
         )));
     }
     Ok(())
@@ -351,7 +403,10 @@ fn image_dimensions(path: &Path) -> Result<(u32, u32), SplitError> {
     let mut file = File::open(path)?;
     let mut header = [0u8; 24];
     file.read_exact(&mut header).map_err(|error| {
-        SplitError::InvalidConfig(format!("Bildkopf konnte nicht gelesen werden: {error}"))
+        SplitError::InvalidConfig(tr_args(
+            "The image header could not be read: {error}",
+            &[("error", error.to_string())],
+        ))
     })?;
     let dimensions = if header.starts_with(b"\x89PNG\r\n\x1a\n") {
         (&header[12..16] == b"IHDR").then(|| {
@@ -368,10 +423,7 @@ fn image_dimensions(path: &Path) -> Result<(u32, u32), SplitError> {
         None
     };
     dimensions.ok_or_else(|| {
-        SplitError::InvalidConfig(
-            "Bildabmessungen konnten vor dem Laden nicht sicher geprüft werden. Unterstützt werden PNG, JPEG und TIFF."
-                .to_string(),
-        )
+        SplitError::InvalidConfig(tr("Image dimensions could not be verified safely before loading. PNG, JPEG and TIFF are supported."))
     })
 }
 
@@ -487,9 +539,9 @@ fn read_image(path: &Path) -> Result<(Mat, Option<u32>), SplitError> {
         || image.cols() as u32 != width
         || image.rows() as u32 != height
     {
-        return Err(SplitError::InvalidConfig(
-            "Das Scanbild hat ein ungültiges Format oder widersprüchliche Abmessungen.".to_string(),
-        ));
+        return Err(SplitError::InvalidConfig(tr(
+            "The scanned image has an invalid format or inconsistent dimensions.",
+        )));
     }
     let orientation = crate::metadata::image_orientation(path).map_err(metadata_error)?;
     let dpi = image_dpi(path)?;
@@ -853,8 +905,12 @@ fn commit_staged(staged: &[StagedOutput], destinations: &[PathBuf]) -> Result<()
             if let Err(rollback_error) = rollback_files(&published) {
                 return Err(std::io::Error::new(
                     rollback_error.kind(),
-                    format!(
-                        "Veröffentlichen schlug fehl ({publish_error}); Zurückrollen schlug ebenfalls fehl ({rollback_error})"
+                    tr_args(
+                        "Publishing failed ({publish_error}); rollback also failed ({rollback_error})",
+                        &[
+                            ("publish_error", publish_error.to_string()),
+                            ("rollback_error", rollback_error.to_string()),
+                        ],
                     ),
                 ));
             }
@@ -886,9 +942,7 @@ fn publish_staged_group(
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 attempt = attempt.checked_add(1).ok_or_else(|| {
-                    SplitError::InvalidConfig(
-                        "Es konnte kein freier Dateiname ermittelt werden.".to_string(),
-                    )
+                    SplitError::InvalidConfig(tr("No available file name could be determined."))
                 })?;
             }
             Err(error) => return Err(SplitError::Io(error)),
@@ -1011,9 +1065,9 @@ fn save_image(
         }
     }
     if !imgcodecs::imwrite(path, image, &params)? {
-        return Err(SplitError::InvalidConfig(format!(
-            "Bild konnte nicht gespeichert werden: {}",
-            path.display()
+        return Err(SplitError::InvalidConfig(tr_args(
+            "The image could not be saved: {path}",
+            &[("path", path.display().to_string())],
         )));
     }
     if let Some(dpi) = metadata_dpi
@@ -1223,10 +1277,9 @@ pub fn export_photos(
         return Err(SplitError::NothingDetected);
     }
     if preview_regions.is_some_and(|regions| regions.len() != photos.len()) {
-        return Err(SplitError::InvalidConfig(
-            "Für jedes exportierte Foto muss genau eine Vorschauregion angegeben werden."
-                .to_string(),
-        ));
+        return Err(SplitError::InvalidConfig(tr(
+            "Exactly one preview region must be supplied for each exported photo.",
+        )));
     }
     fs::create_dir_all(output_directory)?;
     let captured_at = capture_datetime(config.capture_date)?;
@@ -1253,7 +1306,7 @@ pub fn export_photos(
     if let Some(regions) = preview_regions {
         staged.push(StagedOutput {
             temporary: stage_preview(&analyzed.image, regions, output_directory, captured_at)?,
-            stem: format!("{base}_vorschau"),
+            stem: format!("{base}_{}", tr("preview")),
             extension: "jpg",
         });
     }
@@ -1621,7 +1674,9 @@ mod tests {
             Some("gross"),
         )
         .unwrap_err();
-        assert!(matches!(error, SplitError::InvalidConfig(message) if message.contains("zu groß")));
+        assert!(
+            matches!(error, SplitError::InvalidConfig(message) if message.contains("too large"))
+        );
     }
 
     #[test]

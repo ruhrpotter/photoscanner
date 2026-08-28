@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use gtk::glib;
 use photoscanner::default_output_directory;
+use photoscanner::i18n::tr_args;
 
 const GROUP: &str = "settings";
 
@@ -85,9 +86,9 @@ impl PersistedSettings {
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Einstellungsordner konnte nicht angelegt werden: {}",
-                    parent.display()
+                tr_args(
+                    "Could not create the settings folder: {path}",
+                    &[("path", parent.display().to_string())],
                 )
             })?;
         }
@@ -110,9 +111,9 @@ impl PersistedSettings {
             key_file.set_string(GROUP, "capture_date", &date.format("%Y-%m-%d").to_string());
         }
         key_file.save_to_file(path).with_context(|| {
-            format!(
-                "Einstellungen konnten nicht gespeichert werden: {}",
-                path.display()
+            tr_args(
+                "Could not save settings: {path}",
+                &[("path", path.display().to_string())],
             )
         })
     }

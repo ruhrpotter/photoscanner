@@ -17,6 +17,7 @@ use opencv::core::{self, Size, Vector};
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
+use photoscanner::i18n::{tr, tr_args, trn};
 use photoscanner::scanner::{
     DEVICE_DISCOVERY_TIMEOUT, ScannerCancellation, ScannerDevice, list_devices_cancellable,
     scan_to_file_with_progress,
@@ -32,8 +33,14 @@ use crate::gui_settings::PersistedSettings;
 
 const DEFAULT_STYLE: &str = include_str!("style.css");
 const PREVIEW_MAX_EDGE: i32 = 3200;
-const CANCELLED_MESSAGE: &str = "Vorgang abgebrochen.";
-const WORKER_PANIC_MESSAGE: &str = "Interner Fehler im Hintergrundprozess.";
+
+fn cancelled_message() -> String {
+    tr("Operation cancelled.")
+}
+
+fn worker_panic_message() -> String {
+    tr("Internal background worker error.")
+}
 
 struct Ui {
     window: adw::ApplicationWindow,
@@ -206,19 +213,19 @@ fn install_custom_theme(ui: &Rc<Ui>) {
     if let Err(error) = fs::create_dir_all(&directory) {
         show_error(
             ui,
-            &format!(
-                "Theme-Ordner konnte nicht angelegt werden ({}): {error}",
-                directory.display()
+            &tr_args(
+                "Could not create the theme directory ({directory}): {error}",
+                &[
+                    ("directory", directory.display().to_string()),
+                    ("error", error.to_string()),
+                ],
             ),
         );
         return;
     }
 
     let Some(display) = gtk::gdk::Display::default() else {
-        show_error(
-            ui,
-            "Das benutzerdefinierte Theme konnte nicht installiert werden.",
-        );
+        show_error(ui, &tr("The custom theme could not be installed."));
         return;
     };
     let path = directory.join("theme.css");
@@ -226,7 +233,13 @@ fn install_custom_theme(ui: &Rc<Ui>) {
     let weak_ui = Rc::downgrade(ui);
     provider.connect_parsing_error(move |_, _, error| {
         if let Some(ui) = weak_ui.upgrade() {
-            show_error(&ui, &format!("Fehler in theme.css: {error}"));
+            show_error(
+                &ui,
+                &tr_args(
+                    "Error in theme.css: {error}",
+                    &[("error", error.to_string())],
+                ),
+            );
         }
     });
     if let Err(error) = load_custom_theme(&provider, &path) {
@@ -247,7 +260,10 @@ fn install_custom_theme(ui: &Rc<Ui>) {
         Err(error) => {
             show_error(
                 ui,
-                &format!("Theme-Änderungen können nicht überwacht werden: {error}"),
+                &tr_args(
+                    "Theme changes cannot be monitored: {error}",
+                    &[("error", error.to_string())],
+                ),
             );
             return;
         }
@@ -280,8 +296,12 @@ fn install_custom_theme(ui: &Rc<Ui>) {
 
 fn load_custom_theme(provider: &gtk::CssProvider, path: &Path) -> Result<()> {
     if path.is_file() {
-        let stylesheet = fs::read_to_string(path)
-            .with_context(|| format!("Theme konnte nicht gelesen werden: {}", path.display()))?;
+        let stylesheet = fs::read_to_string(path).with_context(|| {
+            tr_args(
+                "Could not read the theme: {path}",
+                &[("path", path.display().to_string())],
+            )
+        })?;
         provider.load_from_string(&stylesheet);
     } else {
         provider.load_from_string("");
@@ -324,16 +344,18 @@ fn build_window(application: &adw::Application) {
         .build();
     split_view.add_css_class("app-shell");
 
-    let device_model = gtk::StringList::new(&["Scanner werden gesucht …"]);
+    let device_model = gtk::StringList::new(&[&tr("Searching for scanners…")]);
     let device_dropdown = adw::ComboRow::builder()
-        .title("Scanner")
+        .title(tr("Scanner"))
         .model(&device_model)
         .build();
 
-    let mode_model =
-        gtk::StringList::new(&["Fotos automatisch trennen", "Gesamte Scanfläche speichern"]);
+    let mode_model = gtk::StringList::new(&[
+        &tr("Automatically separate photos"),
+        &tr("Save the entire scan area"),
+    ]);
     let mode_dropdown = adw::ComboRow::builder()
-        .title("Verarbeitung")
+        .title(tr("Processing"))
         .model(&mode_model)
         .selected(persisted_settings.mode_index)
         .build();
@@ -344,20 +366,20 @@ fn build_window(application: &adw::Application) {
 
     let dpi_model = gtk::StringList::new(&["300 dpi", "600 dpi", "1200 dpi"]);
     let dpi_dropdown = adw::ComboRow::builder()
-        .title("Auflösung")
+        .title(tr("Resolution"))
         .model(&dpi_model)
         .selected(persisted_settings.dpi_index)
         .build();
 
     let format_model = gtk::StringList::new(&["JPG", "PNG", "TIFF"]);
     let format_dropdown = adw::ComboRow::builder()
-        .title("Bildformat")
+        .title(tr("Image format"))
         .model(&format_model)
         .selected(persisted_settings.format_index)
         .build();
 
     let date_entry = adw::EntryRow::builder()
-        .title("Aufnahmedatum")
+        .title(tr("Capture date"))
         .text(
             persisted_settings
                 .capture_date
@@ -367,9 +389,9 @@ fn build_window(application: &adw::Application) {
         )
         .input_purpose(gtk::InputPurpose::FreeForm)
         .build();
-    date_entry.update_property(&[gtk::accessible::Property::Description(
-        "Aufnahmedatum im Format Tag Punkt Monat Punkt Jahr",
-    )]);
+    date_entry.update_property(&[gtk::accessible::Property::Description(&tr(
+        "Capture date in day dot month dot year format",
+    ))]);
     let calendar = gtk::Calendar::new();
     let calendar_popover = gtk::Popover::builder().child(&calendar).build();
     let calendar_button = gtk::MenuButton::builder()
@@ -378,7 +400,7 @@ fn build_window(application: &adw::Application) {
         .valign(gtk::Align::Center)
         .build();
     calendar_button.add_css_class("flat");
-    calendar_button.update_property(&[gtk::accessible::Property::Label("Kalender öffnen")]);
+    calendar_button.update_property(&[gtk::accessible::Property::Label(&tr("Open calendar"))]);
     date_entry.add_suffix(&calendar_button);
     connect_date_picker(&date_entry, &calendar, &calendar_popover);
 
@@ -406,39 +428,39 @@ fn build_window(application: &adw::Application) {
         .build();
     let refresh_button = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
-        .tooltip_text("Scanner neu suchen")
+        .tooltip_text(tr("Search for scanners again"))
         .valign(gtk::Align::Center)
         .build();
     refresh_button.add_css_class("flat");
     refresh_button.add_css_class("icon-action");
     refresh_button.update_property(&[
-        gtk::accessible::Property::Label("Scanner neu suchen"),
-        gtk::accessible::Property::Description("SANE- und AirScan-Geräte erneut abfragen"),
+        gtk::accessible::Property::Label(&tr("Search for scanners again")),
+        gtk::accessible::Property::Description(&tr("Query SANE and AirScan devices again")),
         gtk::accessible::Property::KeyShortcuts("Control+R"),
     ]);
 
     let scan_button = gtk::Button::builder()
-        .label("Scan starten")
+        .label(tr("Start scan"))
         .icon_name("document-send-symbolic")
         .hexpand(true)
         .build();
     scan_button.add_css_class("suggested-action");
     scan_button.add_css_class("primary-action");
     let import_button = gtk::Button::builder()
-        .label("Scandatei öffnen")
+        .label(tr("Open scan file"))
         .icon_name("folder-open-symbolic")
         .hexpand(true)
         .build();
     import_button.add_css_class("primary-action");
     let cancel_button = gtk::Button::builder()
-        .label("Abbrechen")
+        .label(tr("Cancel"))
         .icon_name("process-stop-symbolic")
         .hexpand(true)
         .visible(false)
         .build();
     cancel_button.add_css_class("destructive-action");
     cancel_button.update_property(&[
-        gtk::accessible::Property::Label("Abbrechen"),
+        gtk::accessible::Property::Label(&tr("Cancel")),
         gtk::accessible::Property::KeyShortcuts("Escape"),
     ]);
 
@@ -464,7 +486,7 @@ fn build_window(application: &adw::Application) {
         .valign(gtk::Align::Center)
         .build();
     let status_label = gtk::Label::builder()
-        .label("Bereit zum Scannen")
+        .label(tr("Ready to scan"))
         .xalign(0.0)
         .wrap(true)
         .hexpand(true)
@@ -596,8 +618,8 @@ fn short_path(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .unwrap_or("Ausgabeordner")
-        .to_string()
+        .map(str::to_string)
+        .unwrap_or_else(|| tr("Output folder"))
 }
 
 fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
@@ -605,7 +627,7 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(
         APP_NAME,
-        "Papierfotos digitalisieren",
+        &tr("Digitize paper photos"),
     )));
     toolbar.add_top_bar(&header);
 
@@ -616,19 +638,19 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     content.set_margin_end(16);
     content.add_css_class("scanner-sidebar");
 
-    let scanner_group = adw::PreferencesGroup::builder().title("Scan").build();
+    let scanner_group = adw::PreferencesGroup::builder().title(tr("Scan")).build();
     scanner_group.add(&ui.device_dropdown);
     let refresh_row = adw::ActionRow::builder()
-        .title("Geräte aktualisieren")
-        .subtitle("SANE und AirScan erneut abfragen")
+        .title(tr("Refresh devices"))
+        .subtitle(tr("Query SANE and AirScan again"))
         .build();
     refresh_row.add_suffix(&ui.refresh_button);
     refresh_row.set_activatable_widget(Some(&ui.refresh_button));
     scanner_group.add(&refresh_row);
     scanner_group.add(&ui.mode_dropdown);
     let review_row = adw::ActionRow::builder()
-        .title("Vor dem Speichern prüfen")
-        .subtitle("Erkannte Fotos auswählen und drehen")
+        .title(tr("Review before saving"))
+        .subtitle(tr("Select and rotate detected photos"))
         .build();
     review_row.add_suffix(&ui.review_before_save);
     review_row.set_activatable_widget(Some(&ui.review_before_save));
@@ -637,46 +659,48 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     scanner_group.add(&ui.date_entry);
     content.append(&scanner_group);
 
-    let export_group = adw::PreferencesGroup::builder().title("Ausgabe").build();
+    let export_group = adw::PreferencesGroup::builder().title(tr("Output")).build();
     let output_row = adw::ActionRow::builder()
-        .title("Ordner")
-        .subtitle("Fotos und Kontrollvorschau")
+        .title(tr("Folder"))
+        .subtitle(tr("Photos and detection preview"))
         .build();
     output_row.add_suffix(&ui.output_button);
     output_row.set_activatable_widget(Some(&ui.output_button));
     export_group.add(&output_row);
     export_group.add(&ui.format_dropdown);
     export_group.add(&row_with_suffix(
-        "JPEG-Qualität",
-        Some("Nur für exportierte JPG-Fotos"),
+        &tr("JPEG quality"),
+        Some(&tr("Only for exported JPG photos")),
         &ui.quality,
     ));
     content.append(&export_group);
 
     let detection_group = adw::PreferencesGroup::builder()
-        .title("Erkennung")
-        .description("Die Automatik ist für helle Scannerflächen optimiert.")
+        .title(tr("Detection"))
+        .description(tr(
+            "Automatic detection is optimized for light scanner beds.",
+        ))
         .build();
     let auto_row = adw::ActionRow::builder()
-        .title("Schwellwert automatisch")
-        .subtitle("Hintergrundrauschen am Rand auswerten")
+        .title(tr("Automatic threshold"))
+        .subtitle(tr("Evaluate background noise along the edges"))
         .build();
     auto_row.add_suffix(&ui.auto_threshold);
     auto_row.set_activatable_widget(Some(&ui.auto_threshold));
     detection_group.add(&auto_row);
     detection_group.add(&row_with_suffix(
-        "Manueller Schwellwert",
+        &tr("Manual threshold"),
         None,
         &ui.threshold,
     ));
     detection_group.add(&row_with_suffix(
-        "Mindestfläche (%)",
-        Some("Kleine Staub- und Randflächen ignorieren"),
+        &tr("Minimum area (%)"),
+        Some(&tr("Ignore small dust and edge areas")),
         &ui.min_area,
     ));
     detection_group.add(&row_with_suffix(
-        "Zusätzlicher Rand (%)",
-        Some("Etwas Fläche um jedes Foto erhalten"),
+        &tr("Additional margin (%)"),
+        Some(&tr("Keep some space around each photo")),
         &ui.padding,
     ));
     content.append(&detection_group);
@@ -757,18 +781,18 @@ fn build_preview() -> (
         .homogeneous(true)
         .build();
     let review_title = gtk::Label::builder()
-        .label("Erkannte Fotos prüfen")
+        .label(tr("Review detected photos"))
         .xalign(0.0)
         .hexpand(true)
         .build();
     review_title.add_css_class("title-2");
     let review_save_button = gtk::Button::builder()
-        .label("Fotos speichern")
+        .label(tr("Save photos"))
         .action_name("win.save-review")
         .build();
     review_save_button.add_css_class("suggested-action");
     let review_discard_button = gtk::Button::builder()
-        .label("Verwerfen")
+        .label(tr("Discard"))
         .action_name("win.discard-review")
         .build();
     let review_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -796,10 +820,10 @@ fn build_preview() -> (
     icon.set_pixel_size(72);
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);
     icon.add_css_class("empty-preview-icon");
-    let title = gtk::Label::builder().label("Noch keine Vorschau").build();
+    let title = gtk::Label::builder().label(tr("No preview yet")).build();
     title.add_css_class("title-2");
     let description = gtk::Label::builder()
-        .label("Starte einen Scan oder öffne eine vorhandene Scandatei.")
+        .label(tr("Start a scan or open an existing scan file."))
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -832,31 +856,31 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(
-        "Vorschau",
-        "Erkannte Fotogrenzen",
+        &tr("Preview"),
+        &tr("Detected photo boundaries"),
     )));
     let sidebar_button = gtk::Button::builder()
         .icon_name("sidebar-show-symbolic")
-        .tooltip_text("Einstellungen ein- oder ausblenden")
+        .tooltip_text(tr("Show or hide settings"))
         .action_name("win.toggle-sidebar")
         .build();
     sidebar_button.add_css_class("icon-action");
     sidebar_button.update_property(&[
-        gtk::accessible::Property::Label("Einstellungen ein- oder ausblenden"),
-        gtk::accessible::Property::Description(
-            "Öffnet oder schließt die Seitenleiste mit den Scaneinstellungen",
-        ),
+        gtk::accessible::Property::Label(&tr("Show or hide settings")),
+        gtk::accessible::Property::Description(&tr(
+            "Opens or closes the sidebar containing the scan settings",
+        )),
         gtk::accessible::Property::KeyShortcuts("F10"),
     ]);
     header.pack_start(&sidebar_button);
     for (icon, tooltip, action) in [
         (
             "zoom-fit-best-symbolic",
-            "An Fenster anpassen",
+            tr("Fit to window"),
             "win.zoom-fit",
         ),
-        ("zoom-out-symbolic", "Verkleinern", "win.zoom-out"),
-        ("zoom-in-symbolic", "Vergrößern", "win.zoom-in"),
+        ("zoom-out-symbolic", tr("Zoom out"), "win.zoom-out"),
+        ("zoom-in-symbolic", tr("Zoom in"), "win.zoom-in"),
     ] {
         let button = gtk::Button::builder()
             .icon_name(icon)
@@ -1070,7 +1094,7 @@ fn choose_output_directory(ui: &Ui) {
         return;
     }
     let dialog = gtk::FileDialog::builder()
-        .title("Ausgabeordner auswählen")
+        .title(tr("Select output folder"))
         .modal(true)
         .build();
     dialog.set_initial_folder(Some(&gio::File::for_path(&*ui.output_directory.borrow())));
@@ -1092,11 +1116,11 @@ fn choose_import_file(ui: &Rc<Ui>) {
         return;
     }
     let dialog = gtk::FileDialog::builder()
-        .title("Scandatei öffnen")
+        .title(tr("Open scan file"))
         .modal(true)
         .build();
     let filter = gtk::FileFilter::new();
-    filter.set_name(Some("Bilder"));
+    filter.set_name(Some(&tr("Images")));
     filter.add_mime_type("image/png");
     filter.add_mime_type("image/jpeg");
     filter.add_mime_type("image/tiff");
@@ -1127,7 +1151,7 @@ fn collect_config(ui: &Ui, scanned: bool) -> Result<SplitConfig> {
         Err(error) => {
             set_date_entry_validity(&ui.date_entry, false);
             ui.date_entry.grab_focus();
-            return Err(error).context("Aufnahmedatum muss als TT.MM.JJJJ angegeben werden");
+            return Err(error).context(tr("Capture date must use the DD.MM.YYYY format"));
         }
     };
     let dpi = match ui.dpi_dropdown.selected() {
@@ -1222,7 +1246,7 @@ fn start_scan(ui: &Ui) {
     }
     let selected = ui.device_dropdown.selected() as usize;
     let Some(device) = ui.devices.borrow().get(selected).cloned() else {
-        show_error(ui, "Es ist kein Scanner ausgewählt.");
+        show_error(ui, &tr("No scanner is selected."));
         return;
     };
     let config = match collect_config(ui, true) {
@@ -1248,7 +1272,11 @@ fn start_scan(ui: &Ui) {
         show_previous_preview(ui);
     }
     let (operation_id, cancellation) = begin_operation(ui);
-    set_busy(ui, true, &format!("Scanne mit {dpi} dpi …"));
+    set_busy(
+        ui,
+        true,
+        &tr_args("Scanning at {dpi} dpi…", &[("dpi", dpi.to_string())]),
+    );
     ui.spinner.stop();
     ui.progress_bar.set_fraction(0.0);
     ui.progress_bar.set_visible(true);
@@ -1272,7 +1300,7 @@ fn start_scan(ui: &Ui) {
             )
             .map_err(|error| {
                 if cancellation.is_cancelled() {
-                    CANCELLED_MESSAGE.to_string()
+                    cancelled_message()
                 } else {
                     format!("{error:#}")
                 }
@@ -1322,7 +1350,7 @@ fn scan_work(
         ensure_not_cancelled(cancellation)?;
         let (preview, preview_directory) = bounded_preview(&path)?;
         return Ok(ScanOutcome::Work(WorkResult {
-            title: "Vollständiger Scan gespeichert".to_string(),
+            title: tr("Complete scan saved"),
             detail: path.display().to_string(),
             preview,
             preview_directory,
@@ -1347,14 +1375,20 @@ fn scan_work(
         .preview
         .clone()
         .or_else(|| result.files.first().cloned())
-        .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
+        .ok_or_else(|| anyhow!(tr("No preview file was created")))?;
     let (preview, preview_directory) = bounded_preview(&preview_source)?;
     Ok(ScanOutcome::Work(WorkResult {
-        title: format!("{} Foto(s) gespeichert", result.files.len()),
-        detail: format!(
-            "{} · Schwellwert {:.1}",
-            output.display(),
-            result.threshold_used
+        title: trn(
+            "{count} photo saved",
+            "{count} photos saved",
+            result.files.len(),
+        ),
+        detail: tr_args(
+            "{output} · Threshold {threshold}",
+            &[
+                ("output", output.display().to_string()),
+                ("threshold", format!("{:.1}", result.threshold_used)),
+            ],
         ),
         preview,
         preview_directory,
@@ -1383,7 +1417,7 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
         show_previous_preview(ui);
     }
     let (operation_id, cancellation) = begin_operation(ui);
-    set_busy(ui, true, "Analysiere Scandatei …");
+    set_busy(ui, true, &tr("Analyzing scan file…"));
     thread::spawn(move || {
         if review {
             let status_sender = sender.clone();
@@ -1396,13 +1430,16 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
                     Some(Box::new(move |index, total| {
                         let _ = status_sender.try_send(Message::Status {
                             operation_id,
-                            text: format!("Analysiere Datei {index} von {total} …"),
+                            text: tr_args(
+                                "Analyzing file {index} of {total}…",
+                                &[("index", index.to_string()), ("total", total.to_string())],
+                            ),
                         });
                     })),
                 )
                 .map_err(|error| {
                     if cancellation.is_cancelled() {
-                        CANCELLED_MESSAGE.to_string()
+                        cancelled_message()
                     } else {
                         format!("{error:#}")
                     }
@@ -1424,11 +1461,20 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
                     ensure_not_cancelled(&cancellation)?;
                     let _ = sender.try_send(Message::Status {
                         operation_id,
-                        text: format!("Analysiere Datei {} von {} …", index + 1, file_count),
+                        text: tr_args(
+                            "Analyzing file {index} of {total}…",
+                            &[
+                                ("index", (index + 1).to_string()),
+                                ("total", file_count.to_string()),
+                            ],
+                        ),
                     });
                     let processed = (|| -> Result<(usize, PathBuf, TempDir)> {
                         if !source.is_file() {
-                            bail!("Die Scandatei existiert nicht mehr: {}", source.display());
+                            bail!(tr_args(
+                                "The scan file no longer exists: {path}",
+                                &[("path", source.display().to_string())],
+                            ));
                         }
                         if full_scan {
                             let path = save_full_scan(source, &output, &config, None)?;
@@ -1442,7 +1488,7 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
                             .preview
                             .clone()
                             .or_else(|| result.files.first().cloned())
-                            .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
+                            .ok_or_else(|| anyhow!(tr("No preview file was created")))?;
                         let (preview, preview_directory) = bounded_preview(&preview_source)?;
                         Ok((result.files.len(), preview, preview_directory))
                     })();
@@ -1458,7 +1504,8 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
                             let name = source
                                 .file_name()
                                 .and_then(|name| name.to_str())
-                                .unwrap_or("Unbekannte Datei");
+                                .map(str::to_string)
+                                .unwrap_or_else(|| tr("Unknown file"));
                             failures
                                 .push(format!("{name}: {}", error_summary(&format!("{error:#}"))));
                         }
@@ -1466,20 +1513,23 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
                 }
                 ensure_not_cancelled(&cancellation)?;
                 let Some((preview, preview_directory)) = last_preview else {
-                    bail!(
-                        "Keine Datei konnte verarbeitet werden:\n{}",
-                        failures.join("\n")
-                    );
+                    bail!(tr_args(
+                        "No file could be processed:\n{errors}",
+                        &[("errors", failures.join("\n"))],
+                    ));
                 };
                 let mut detail = output.display().to_string();
                 if !failures.is_empty() {
-                    detail.push_str("\nFehler:\n");
+                    detail.push_str(&tr("\nErrors:\n"));
                     detail.push_str(&failures.join("\n"));
                 }
                 Ok(WorkResult {
-                    title: format!(
-                        "{} Foto(s) aus {} Datei(en) gespeichert",
-                        photo_count, file_count
+                    title: tr_args(
+                        "Saved {photos} photo(s) from {files} file(s)",
+                        &[
+                            ("photos", photo_count.to_string()),
+                            ("files", file_count.to_string()),
+                        ],
                     ),
                     detail,
                     preview,
@@ -1491,7 +1541,7 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
             })()
             .map_err(|error| {
                 if cancellation.is_cancelled() {
-                    CANCELLED_MESSAGE.to_string()
+                    cancelled_message()
                 } else {
                     format!("{error:#}")
                 }
@@ -1536,7 +1586,7 @@ fn prepare_review(
                     .path()
                     .join(format!("photo_{source_index:03}_{region_index:03}.png"));
                 if !imgcodecs::imwrite_def(&full_path, &photo)? {
-                    bail!("Prüffoto konnte nicht zwischengespeichert werden");
+                    bail!(tr("Could not stage the review photo"));
                 }
                 let thumbnail_path = staging
                     .path()
@@ -1551,7 +1601,7 @@ fn prepare_review(
                 });
             }
             if group_photos.is_empty() {
-                bail!("Keine ausreichend großen Fotos erkannt");
+                bail!(tr("No sufficiently large photos were detected"));
             }
             let overview_path = staging
                 .path()
@@ -1577,17 +1627,18 @@ fn prepare_review(
                 let name = source
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .unwrap_or("Unbekannte Datei");
+                    .map(str::to_string)
+                    .unwrap_or_else(|| tr("Unknown file"));
                 failures.push(format!("{name}: {}", error_summary(&format!("{error:#}"))));
             }
         }
     }
     ensure_not_cancelled(cancellation)?;
     let Some(overview) = overview else {
-        bail!(
-            "Keine Datei konnte für die Prüfung vorbereitet werden:\n{}",
-            failures.join("\n")
-        );
+        bail!(tr_args(
+            "No file could be prepared for review:\n{errors}",
+            &[("errors", failures.join("\n"))],
+        ));
     };
     Ok(ReviewData {
         _staging: staging,
@@ -1622,7 +1673,7 @@ fn write_thumbnail(photo: &Mat, path: &Path) -> Result<()> {
     }
     let parameters = Vector::from_slice(&[imgcodecs::IMWRITE_JPEG_QUALITY, 86]);
     if !imgcodecs::imwrite(path, &thumbnail, &parameters)? {
-        bail!("Miniatur konnte nicht gespeichert werden");
+        bail!(tr("Could not save the thumbnail"));
     }
     Ok(())
 }
@@ -1639,7 +1690,7 @@ fn request_devices(ui: &Ui) {
     ui.cancel_button.set_visible(true);
     set_status(
         ui,
-        "Suche Scanner …",
+        &tr("Searching for scanners…"),
         gtk::AccessibleAnnouncementPriority::Low,
     );
     ui.spinner.start();
@@ -1648,7 +1699,7 @@ fn request_devices(ui: &Ui) {
         let result = run_worker(|| {
             list_devices_cancellable(DEVICE_DISCOVERY_TIMEOUT, &cancellation).map_err(|error| {
                 if cancellation.is_cancelled() {
-                    CANCELLED_MESSAGE.to_string()
+                    cancelled_message()
                 } else {
                     error.to_string()
                 }
@@ -1678,7 +1729,10 @@ fn handle_message(ui: &Ui, message: Message) {
             ui.progress_bar.set_fraction(*percent / 100.0);
             set_status(
                 ui,
-                &format!("Scanne … {percent:.0} %"),
+                &tr_args(
+                    "Scanning… {percent}%",
+                    &[("percent", format!("{percent:.0}"))],
+                ),
                 gtk::AccessibleAnnouncementPriority::Low,
             );
         }
@@ -1704,10 +1758,10 @@ fn handle_message(ui: &Ui, message: Message) {
 
     match message {
         Message::Progress { .. } => {
-            unreachable!("Fortschritt wird vor Terminalnachrichten behandelt")
+            unreachable!("progress is handled before terminal messages")
         }
         Message::Status { .. } => {
-            unreachable!("Status wird vor Terminalnachrichten behandelt")
+            unreachable!("status is handled before terminal messages")
         }
         Message::Devices {
             result: Ok(devices),
@@ -1725,11 +1779,11 @@ fn handle_message(ui: &Ui, message: Message) {
             ui.refresh_action.set_enabled(true);
             ui.spinner.stop();
             if ui.devices.borrow().is_empty() {
-                ui.device_model.append("Kein Scanner erkannt");
+                ui.device_model.append(&tr("No scanner detected"));
                 ui.scan_action.set_enabled(false);
                 set_status(
                     ui,
-                    "Kein Scanner erkannt",
+                    &tr("No scanner detected"),
                     gtk::AccessibleAnnouncementPriority::Medium,
                 );
                 ui.import_button.grab_focus();
@@ -1737,7 +1791,7 @@ fn handle_message(ui: &Ui, message: Message) {
                 ui.scan_action.set_enabled(true);
                 set_status(
                     ui,
-                    "Scanner bereit",
+                    &tr("Scanner ready"),
                     gtk::AccessibleAnnouncementPriority::Low,
                 );
                 ui.device_dropdown.grab_focus();
@@ -1749,7 +1803,7 @@ fn handle_message(ui: &Ui, message: Message) {
             ui.refresh_action.set_enabled(true);
             ui.scan_action.set_enabled(!ui.devices.borrow().is_empty());
             ui.spinner.stop();
-            if error != CANCELLED_MESSAGE {
+            if error != cancelled_message() {
                 show_error(ui, &error);
                 ui.refresh_button.grab_focus();
             }
@@ -1758,16 +1812,23 @@ fn handle_message(ui: &Ui, message: Message) {
             result: Ok(review), ..
         } => {
             let count = review.photos.len();
-            set_busy(ui, false, &format!("{count} Fotos erkannt – bitte prüfen"));
+            set_busy(
+                ui,
+                false,
+                &tr_args(
+                    "{count} photo(s) detected – please review",
+                    &[("count", count.to_string())],
+                ),
+            );
             show_review(ui, review);
         }
         Message::ReviewReady {
             result: Err(error), ..
         } => {
-            if error.starts_with(CANCELLED_MESSAGE) {
-                set_busy(ui, false, "Vorgang abgebrochen");
+            if error.starts_with(&cancelled_message()) {
+                set_busy(ui, false, &tr("Operation cancelled"));
             } else {
-                set_busy(ui, false, "Prüfung konnte nicht vorbereitet werden");
+                set_busy(ui, false, &tr("Review could not be prepared"));
                 show_error(ui, &error);
             }
         }
@@ -1788,7 +1849,7 @@ fn handle_message(ui: &Ui, message: Message) {
             set_preview_zoom(ui, 0.0);
             set_zoom_actions_enabled(ui, true);
             ui.picture.update_property(&[
-                gtk::accessible::Property::Label("Scanvorschau"),
+                gtk::accessible::Property::Label(&tr("Scan preview")),
                 gtk::accessible::Property::Description(&result.title),
             ]);
             *ui.preview_directory.borrow_mut() = Some(result.preview_directory);
@@ -1802,10 +1863,10 @@ fn handle_message(ui: &Ui, message: Message) {
             drop_review(ui);
             show_previous_preview(ui);
             ui.window.set_default_widget(Some(&ui.scan_button));
-            if error.starts_with(CANCELLED_MESSAGE) {
-                set_busy(ui, false, "Vorgang abgebrochen");
+            if error.starts_with(&cancelled_message()) {
+                set_busy(ui, false, &tr("Operation cancelled"));
             } else {
-                set_busy(ui, false, "Vorgang fehlgeschlagen");
+                set_busy(ui, false, &tr("Operation failed"));
                 show_error(ui, &error);
             }
         }
@@ -1820,8 +1881,11 @@ fn show_review(ui: &Ui, review: ReviewData) {
     ui.review_overview
         .set_file(Some(&gio::File::for_path(&review.overview)));
     let included_count = Rc::new(Cell::new(review.photos.len()));
-    ui.review_save_button
-        .set_label(&format!("{} Fotos speichern", review.photos.len()));
+    ui.review_save_button.set_label(&trn(
+        "Save {count} photo",
+        "Save {count} photos",
+        review.photos.len(),
+    ));
     let mut selections = Vec::with_capacity(review.photos.len());
     for (index, photo) in review.photos.iter().enumerate() {
         let include = Rc::new(Cell::new(true));
@@ -1869,12 +1933,15 @@ fn build_review_card(
         .height_request(140)
         .build();
     let check = gtk::CheckButton::builder()
-        .label(format!("Foto {} speichern", index + 1))
+        .label(tr_args(
+            "Save photo {number}",
+            &[("number", (index + 1).to_string())],
+        ))
         .active(true)
         .build();
     let rotate = gtk::Button::builder()
         .icon_name("object-rotate-right-symbolic")
-        .tooltip_text("90° nach rechts drehen")
+        .tooltip_text(tr("Rotate 90° clockwise"))
         .build();
     rotate.add_css_class("flat");
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -1902,7 +1969,7 @@ fn build_review_card(
                 count.get().saturating_sub(1)
             };
             count.set(next);
-            save_button.set_label(&format!("{next} Fotos speichern"));
+            save_button.set_label(&trn("Save {count} photo", "Save {count} photos", next));
             save_action.set_enabled(next > 0);
         }
     });
@@ -1955,7 +2022,7 @@ fn discard_review(ui: &Ui) {
     ui.window.set_default_widget(Some(&ui.scan_button));
     set_status(
         ui,
-        "Prüfung verworfen",
+        &tr("Review discarded"),
         gtk::AccessibleAnnouncementPriority::Medium,
     );
 }
@@ -1984,7 +2051,7 @@ fn save_review(ui: &Ui) {
         })
         .unwrap_or(0);
     if included == 0 {
-        show_error(ui, "Wähle mindestens ein Foto zum Speichern aus.");
+        show_error(ui, &tr("Select at least one photo to save."));
         return;
     }
     let Some(review) = ui.review_state.borrow_mut().take() else {
@@ -1999,12 +2066,19 @@ fn save_review(ui: &Ui) {
     ui.discard_review_action.set_enabled(false);
     let sender = ui.sender.clone();
     let (operation_id, cancellation) = begin_operation(ui);
-    set_busy(ui, true, &format!("Speichere {included} Fotos …"));
+    set_busy(
+        ui,
+        true,
+        &tr_args(
+            "Saving {count} photo(s)…",
+            &[("count", included.to_string())],
+        ),
+    );
     thread::spawn(move || {
         let result = run_worker(|| {
             save_review_work(review.data, &selections, &cancellation).map_err(|error| {
                 if cancellation.is_cancelled() {
-                    CANCELLED_MESSAGE.to_string()
+                    cancelled_message()
                 } else {
                     format!("{error:#}")
                 }
@@ -2034,10 +2108,10 @@ fn save_review_work(
             }
             let mut image = imgcodecs::imread(&photo.full_path, imgcodecs::IMREAD_COLOR)?;
             if image.empty() {
-                bail!(
-                    "Prüffoto enthält keine Bilddaten: {}",
-                    photo.full_path.display()
-                );
+                bail!(tr_args(
+                    "Review photo contains no image data: {path}",
+                    &[("path", photo.full_path.display().to_string())],
+                ));
             }
             image = rotate_quarter_turns(&image, selections[index].1)?;
             photos.push(image);
@@ -2058,16 +2132,15 @@ fn save_review_work(
         last_preview = result.preview.or_else(|| result.files.first().cloned());
     }
     ensure_not_cancelled(cancellation)?;
-    let preview_source =
-        last_preview.ok_or_else(|| anyhow!("Kein Foto zum Speichern ausgewählt"))?;
+    let preview_source = last_preview.ok_or_else(|| anyhow!(tr("No photo selected for saving")))?;
     let (preview, preview_directory) = bounded_preview(&preview_source)?;
     let mut detail = review.output.display().to_string();
     if !review.failures.is_empty() {
-        detail.push_str("\nFehler:\n");
+        detail.push_str(&tr("\nErrors:\n"));
         detail.push_str(&review.failures.join("\n"));
     }
     Ok(WorkResult {
-        title: format!("{file_count} Foto(s) gespeichert"),
+        title: trn("{count} photo saved", "{count} photos saved", file_count),
         detail,
         preview,
         preview_directory,
@@ -2176,7 +2249,13 @@ fn save_settings(ui: &Ui) {
         capture_date: ui.last_capture_date.get(),
     };
     if let Err(error) = settings.save(&ui.settings_path) {
-        eprintln!("Einstellungen konnten nicht gespeichert werden: {error:#}");
+        eprintln!(
+            "{}",
+            tr_args(
+                "Could not save settings: {error}",
+                &[("error", format!("{error:#}"))],
+            )
+        );
     }
 }
 
@@ -2224,7 +2303,7 @@ fn show_error(ui: &Ui, message: &str) {
     let mut toast = adw::Toast::builder().title(&summary).timeout(6);
     if summary != message {
         toast = toast
-            .button_label("Details")
+            .button_label(tr("Details"))
             .action_name("win.error-details");
     }
     ui.toast_overlay.add_toast(toast.build());
@@ -2259,9 +2338,9 @@ fn show_error_details(ui: &Ui) {
         .propagate_natural_height(true)
         .child(&label)
         .build();
-    let dialog = adw::AlertDialog::new(Some("Fehlerdetails"), None);
+    let dialog = adw::AlertDialog::new(Some(&tr("Error details")), None);
     dialog.set_extra_child(Some(&scroll));
-    dialog.add_response("close", "Schließen");
+    dialog.add_response("close", &tr("Close"));
     dialog.set_close_response("close");
     dialog.set_default_response(Some("close"));
     dialog.present(Some(&ui.window));
@@ -2294,7 +2373,7 @@ fn cancel_current_work(ui: &Ui) {
         ui.cancel_action.set_enabled(false);
         set_status(
             ui,
-            "Abbruch angefordert …",
+            &tr("Cancellation requested…"),
             gtk::AccessibleAnnouncementPriority::Medium,
         );
     }
@@ -2302,20 +2381,27 @@ fn cancel_current_work(ui: &Ui) {
 
 fn ensure_not_cancelled(cancellation: &ScannerCancellation) -> Result<()> {
     if cancellation.is_cancelled() {
-        bail!(CANCELLED_MESSAGE);
+        bail!(cancelled_message());
     }
     Ok(())
 }
 
 fn run_worker<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|_| Err(WORKER_PANIC_MESSAGE.to_string()))
+    catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|_| Err(worker_panic_message()))
 }
 
 fn bounded_preview(source: &Path) -> Result<(PathBuf, TempDir)> {
-    let image = imgcodecs::imread(source, imgcodecs::IMREAD_COLOR)
-        .with_context(|| format!("Vorschau konnte nicht gelesen werden: {}", source.display()))?;
+    let image = imgcodecs::imread(source, imgcodecs::IMREAD_COLOR).with_context(|| {
+        tr_args(
+            "Could not read preview: {path}",
+            &[("path", source.display().to_string())],
+        )
+    })?;
     if image.empty() {
-        bail!("Vorschau enthält keine Bilddaten: {}", source.display());
+        bail!(tr_args(
+            "Preview contains no image data: {path}",
+            &[("path", source.display().to_string())],
+        ));
     }
 
     let largest_edge = image.cols().max(image.rows());
@@ -2335,7 +2421,7 @@ fn bounded_preview(source: &Path) -> Result<(PathBuf, TempDir)> {
     let path = directory.path().join("preview.jpg");
     let parameters = Vector::from_slice(&[imgcodecs::IMWRITE_JPEG_QUALITY, 86]);
     if !imgcodecs::imwrite(&path, &preview, &parameters)? {
-        bail!("Vorschaudatei konnte nicht gespeichert werden");
+        bail!(tr("Could not save the preview file"));
     }
     Ok((path, directory))
 }
@@ -2367,7 +2453,7 @@ mod tests {
 
     #[test]
     fn error_summary_uses_first_line_and_limits_length() {
-        assert_eq!(error_summary("Kurz\nTechnische Details"), "Kurz");
+        assert_eq!(error_summary("Short\nTechnical details"), "Short");
         let long = "x".repeat(140);
         let summary = error_summary(&long);
         assert_eq!(summary.chars().count(), 120);

@@ -1,0 +1,661 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE photoscanner'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the photoscanner package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: photoscanner 0.2.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-28 05:43+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/cli.rs:142
+msgid "Using scanner: {scanner}"
+msgstr ""
+
+#: src/cli.rs:154
+msgid "Scanning at {dpi} dpi ..."
+msgstr ""
+
+#: src/cli.rs:168
+msgid "No scanner detected."
+msgstr ""
+
+#: src/cli.rs:191
+msgid "File: {path}"
+msgstr ""
+
+#: src/cli.rs:206
+msgid "Error processing {path}: {error}"
+msgstr ""
+
+#: src/cli.rs:218
+msgid "{failed} of {total} files could not be processed"
+msgstr ""
+
+#: src/cli.rs:257
+msgid "The full scan could not be saved"
+msgstr ""
+
+#: src/cli.rs:261
+msgid "Full scan saved:\n"
+"{path}"
+msgstr ""
+
+#: src/cli.rs:274
+msgid "One photo saved:"
+msgid_plural "{count} photos saved:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/cli.rs:286
+msgid "Preview: {path}"
+msgstr ""
+
+#: src/cli.rs:294
+msgid "Detection threshold: {threshold}"
+msgstr ""
+
+#: src/gui.rs:38
+msgid "Operation cancelled."
+msgstr ""
+
+#: src/gui.rs:42
+msgid "Internal background worker error."
+msgstr ""
+
+#: src/gui.rs:217
+msgid "Could not create the theme directory ({directory}): {error}"
+msgstr ""
+
+#: src/gui.rs:228
+msgid "The custom theme could not be installed."
+msgstr ""
+
+#: src/gui.rs:239
+msgid "Error in theme.css: {error}"
+msgstr ""
+
+#: src/gui.rs:264
+msgid "Theme changes cannot be monitored: {error}"
+msgstr ""
+
+#: src/gui.rs:301
+msgid "Could not read the theme: {path}"
+msgstr ""
+
+#: src/gui.rs:347 src/gui.rs:1693
+msgid "Searching for scanners…"
+msgstr ""
+
+#: src/gui.rs:349
+msgid "Scanner"
+msgstr ""
+
+#: src/gui.rs:354
+msgid "Automatically separate photos"
+msgstr ""
+
+#: src/gui.rs:355
+msgid "Save the entire scan area"
+msgstr ""
+
+#: src/gui.rs:358
+msgid "Processing"
+msgstr ""
+
+#: src/gui.rs:369
+msgid "Resolution"
+msgstr ""
+
+#: src/gui.rs:376
+msgid "Image format"
+msgstr ""
+
+#: src/gui.rs:382
+msgid "Capture date"
+msgstr ""
+
+#: src/gui.rs:393
+msgid "Capture date in day dot month dot year format"
+msgstr ""
+
+#: src/gui.rs:403
+msgid "Open calendar"
+msgstr ""
+
+#: src/gui.rs:431 src/gui.rs:437
+msgid "Search for scanners again"
+msgstr ""
+
+#: src/gui.rs:438
+msgid "Query SANE and AirScan devices again"
+msgstr ""
+
+#: src/gui.rs:443
+msgid "Start scan"
+msgstr ""
+
+#: src/gui.rs:450 src/gui.rs:1119
+msgid "Open scan file"
+msgstr ""
+
+#: src/gui.rs:456 src/gui.rs:463
+msgid "Cancel"
+msgstr ""
+
+#: src/gui.rs:489
+msgid "Ready to scan"
+msgstr ""
+
+#: src/gui.rs:622
+msgid "Output folder"
+msgstr ""
+
+#: src/gui.rs:630
+msgid "Digitize paper photos"
+msgstr ""
+
+#: src/gui.rs:641
+msgid "Scan"
+msgstr ""
+
+#: src/gui.rs:644
+msgid "Refresh devices"
+msgstr ""
+
+#: src/gui.rs:645
+msgid "Query SANE and AirScan again"
+msgstr ""
+
+#: src/gui.rs:652
+msgid "Review before saving"
+msgstr ""
+
+#: src/gui.rs:653
+msgid "Select and rotate detected photos"
+msgstr ""
+
+#: src/gui.rs:662
+msgid "Output"
+msgstr ""
+
+#: src/gui.rs:664
+msgid "Folder"
+msgstr ""
+
+#: src/gui.rs:665
+msgid "Photos and detection preview"
+msgstr ""
+
+#: src/gui.rs:672
+msgid "JPEG quality"
+msgstr ""
+
+#: src/gui.rs:673
+msgid "Only for exported JPG photos"
+msgstr ""
+
+#: src/gui.rs:679
+msgid "Detection"
+msgstr ""
+
+#: src/gui.rs:681
+msgid "Automatic detection is optimized for light scanner beds."
+msgstr ""
+
+#: src/gui.rs:685
+msgid "Automatic threshold"
+msgstr ""
+
+#: src/gui.rs:686
+msgid "Evaluate background noise along the edges"
+msgstr ""
+
+#: src/gui.rs:692
+msgid "Manual threshold"
+msgstr ""
+
+#: src/gui.rs:697
+msgid "Minimum area (%)"
+msgstr ""
+
+#: src/gui.rs:698
+msgid "Ignore small dust and edge areas"
+msgstr ""
+
+#: src/gui.rs:702
+msgid "Additional margin (%)"
+msgstr ""
+
+#: src/gui.rs:703
+msgid "Keep some space around each photo"
+msgstr ""
+
+#: src/gui.rs:784
+msgid "Review detected photos"
+msgstr ""
+
+#: src/gui.rs:790
+msgid "Save photos"
+msgstr ""
+
+#: src/gui.rs:795
+msgid "Discard"
+msgstr ""
+
+#: src/gui.rs:823
+msgid "No preview yet"
+msgstr ""
+
+#: src/gui.rs:826
+msgid "Start a scan or open an existing scan file."
+msgstr ""
+
+#: src/gui.rs:859
+msgid "Preview"
+msgstr ""
+
+#: src/gui.rs:860
+msgid "Detected photo boundaries"
+msgstr ""
+
+#: src/gui.rs:864 src/gui.rs:869
+msgid "Show or hide settings"
+msgstr ""
+
+#: src/gui.rs:871
+msgid "Opens or closes the sidebar containing the scan settings"
+msgstr ""
+
+#: src/gui.rs:879
+msgid "Fit to window"
+msgstr ""
+
+#: src/gui.rs:882
+msgid "Zoom out"
+msgstr ""
+
+#: src/gui.rs:883
+msgid "Zoom in"
+msgstr ""
+
+#: src/gui.rs:1097
+msgid "Select output folder"
+msgstr ""
+
+#: src/gui.rs:1123
+msgid "Images"
+msgstr ""
+
+#: src/gui.rs:1154
+msgid "Capture date must use the DD.MM.YYYY format"
+msgstr ""
+
+#: src/gui.rs:1249
+msgid "No scanner is selected."
+msgstr ""
+
+#: src/gui.rs:1278
+msgid "Scanning at {dpi} dpi…"
+msgstr ""
+
+#: src/gui.rs:1353
+msgid "Complete scan saved"
+msgstr ""
+
+#: src/gui.rs:1378 src/gui.rs:1491
+msgid "No preview file was created"
+msgstr ""
+
+#: src/gui.rs:1382 src/gui.rs:2143
+msgid "{count} photo saved"
+msgid_plural "{count} photos saved"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gui.rs:1387
+msgid "{output} · Threshold {threshold}"
+msgstr ""
+
+#: src/gui.rs:1420
+msgid "Analyzing scan file…"
+msgstr ""
+
+#: src/gui.rs:1434 src/gui.rs:1465
+msgid "Analyzing file {index} of {total}…"
+msgstr ""
+
+#: src/gui.rs:1475
+msgid "The scan file no longer exists: {path}"
+msgstr ""
+
+#: src/gui.rs:1508 src/gui.rs:1631
+msgid "Unknown file"
+msgstr ""
+
+#: src/gui.rs:1517
+msgid "No file could be processed:\n"
+"{errors}"
+msgstr ""
+
+#: src/gui.rs:1523 src/gui.rs:2139
+msgid "\n"
+"Errors:\n"
+""
+msgstr ""
+
+#: src/gui.rs:1528
+msgid "Saved {photos} photo(s) from {files} file(s)"
+msgstr ""
+
+#: src/gui.rs:1589
+msgid "Could not stage the review photo"
+msgstr ""
+
+#: src/gui.rs:1604
+msgid "No sufficiently large photos were detected"
+msgstr ""
+
+#: src/gui.rs:1639
+msgid "No file could be prepared for review:\n"
+"{errors}"
+msgstr ""
+
+#: src/gui.rs:1676
+msgid "Could not save the thumbnail"
+msgstr ""
+
+#: src/gui.rs:1733
+msgid "Scanning… {percent}%"
+msgstr ""
+
+#: src/gui.rs:1782 src/gui.rs:1786
+msgid "No scanner detected"
+msgstr ""
+
+#: src/gui.rs:1794
+msgid "Scanner ready"
+msgstr ""
+
+#: src/gui.rs:1819
+msgid "{count} photo(s) detected – please review"
+msgstr ""
+
+#: src/gui.rs:1829 src/gui.rs:1867
+msgid "Operation cancelled"
+msgstr ""
+
+#: src/gui.rs:1831
+msgid "Review could not be prepared"
+msgstr ""
+
+#: src/gui.rs:1852
+msgid "Scan preview"
+msgstr ""
+
+#: src/gui.rs:1869
+msgid "Operation failed"
+msgstr ""
+
+#: src/gui.rs:1885 src/gui.rs:1972
+msgid "Save {count} photo"
+msgid_plural "Save {count} photos"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gui.rs:1937
+msgid "Save photo {number}"
+msgstr ""
+
+#: src/gui.rs:1944
+msgid "Rotate 90° clockwise"
+msgstr ""
+
+#: src/gui.rs:2025
+msgid "Review discarded"
+msgstr ""
+
+#: src/gui.rs:2054
+msgid "Select at least one photo to save."
+msgstr ""
+
+#: src/gui.rs:2073
+msgid "Saving {count} photo(s)…"
+msgstr ""
+
+#: src/gui.rs:2112
+msgid "Review photo contains no image data: {path}"
+msgstr ""
+
+#: src/gui.rs:2135
+msgid "No photo selected for saving"
+msgstr ""
+
+#: src/gui.rs:2255
+msgid "Could not save settings: {error}"
+msgstr ""
+
+#: src/gui.rs:2306
+msgid "Details"
+msgstr ""
+
+#: src/gui.rs:2341
+msgid "Error details"
+msgstr ""
+
+#: src/gui.rs:2343
+msgid "Close"
+msgstr ""
+
+#: src/gui.rs:2376
+msgid "Cancellation requested…"
+msgstr ""
+
+#: src/gui.rs:2396
+msgid "Could not read preview: {path}"
+msgstr ""
+
+#: src/gui.rs:2402
+msgid "Preview contains no image data: {path}"
+msgstr ""
+
+#: src/gui.rs:2424
+msgid "Could not save the preview file"
+msgstr ""
+
+#: src/gui_settings.rs:90
+msgid "Could not create the settings folder: {path}"
+msgstr ""
+
+#: src/gui_settings.rs:115
+msgid "Could not save settings: {path}"
+msgstr ""
+
+#: src/main.rs:22
+msgid "Error: {error}"
+msgstr ""
+
+#: src/metadata.rs:25
+msgid "The 'exiv2' image metadata program was not found. Install it with your package manager (e.g. 'sudo pacman -S exiv2' on Arch)."
+msgstr ""
+
+#: src/metadata.rs:28
+msgid "The metadata process could not be executed: {error}"
+msgstr ""
+
+#: src/metadata.rs:32
+msgid "Metadata from '{path}' could not be read: {detail}"
+msgstr ""
+
+#: src/metadata.rs:39
+msgid "Metadata for '{path}' could not be written: {detail}"
+msgstr ""
+
+#: src/metadata.rs:46
+msgid "The metadata file path could not be resolved: {error}"
+msgstr ""
+
+#: src/metadata.rs:50
+msgid "The modification date could not be set: {error}"
+msgstr ""
+
+#: src/metadata.rs:85
+msgid "exiv2 exited with status {status}"
+msgstr ""
+
+#: src/scanner.rs:74
+msgid "SANE is not installed: The 'scanimage' program was not found. Install it with your package manager (e.g. 'sudo pacman -S sane sane-airscan' on Arch)."
+msgstr ""
+
+#: src/scanner.rs:76
+msgid "Scanner discovery timed out."
+msgstr ""
+
+#: src/scanner.rs:78
+msgid "Scanners could not be queried: {detail}"
+msgstr ""
+
+#: src/scanner.rs:81
+msgid "Resolution must be between 75 and 2400 dpi."
+msgstr ""
+
+#: src/scanner.rs:82
+msgid "The scan timed out."
+msgstr ""
+
+#: src/scanner.rs:83
+msgid "The operation was cancelled."
+msgstr ""
+
+#: src/scanner.rs:85
+msgid "The scan failed: {detail}"
+msgstr ""
+
+#: src/scanner.rs:87
+msgid "The scanner returned no image data."
+msgstr ""
+
+#: src/scanner.rs:89
+msgid "The destination file already exists: {path}"
+msgstr ""
+
+#: src/scanner.rs:93
+msgid "The scanner process could not be started: {error}"
+msgstr ""
+
+#: src/scanner.rs:354
+msgid "Pipe reader thread aborted"
+msgstr ""
+
+#: src/scanner.rs:463
+msgid "unknown SANE error"
+msgstr ""
+
+#: src/scanner.rs:596
+msgid "unknown error"
+msgstr ""
+
+#: src/splitter.rs:51
+msgid "The input file does not exist: {path}"
+msgstr ""
+
+#: src/splitter.rs:55
+msgid "The image could not be processed: {error}"
+msgstr ""
+
+#: src/splitter.rs:59
+msgid "File operation failed: {error}"
+msgstr ""
+
+#: src/splitter.rs:63
+msgid "Image metadata could not be processed: {detail}"
+msgstr ""
+
+#: src/splitter.rs:67
+msgid "No individual photos were detected. Leave space between the photos or try a lower threshold."
+msgstr ""
+
+#: src/splitter.rs:69
+msgid "The selected capture date is invalid in the local time zone."
+msgstr ""
+
+#: src/splitter.rs:139
+msgid "Supported formats are JPG, PNG and TIFF."
+msgstr ""
+
+#: src/splitter.rs:186
+msgid "Minimum area must be between 0.1 and 50 percent."
+msgstr ""
+
+#: src/splitter.rs:194
+msgid "Threshold must be between 1 and 255."
+msgstr ""
+
+#: src/splitter.rs:199
+msgid "Padding must be between 0 and 15 percent."
+msgstr ""
+
+#: src/splitter.rs:204
+msgid "Maximum detection size must be between {minimum} and {maximum} pixels."
+msgstr ""
+
+#: src/splitter.rs:213
+msgid "JPEG quality must be between 1 and 100."
+msgstr ""
+
+#: src/splitter.rs:230
+msgid "The file prefix must be exactly one safe file name with at most {maximum} bytes."
+msgstr ""
+
+#: src/splitter.rs:240
+msgid "The image dimensions are invalid."
+msgstr ""
+
+#: src/splitter.rs:243
+msgid "The scanned image is too small or has an invalid format."
+msgstr ""
+
+#: src/splitter.rs:248
+msgid "The image is too large at {width}×{height} pixels. At most {maximum_pixels} pixels and {maximum_edge} pixels per edge are allowed."
+msgstr ""
+
+#: src/splitter.rs:407
+msgid "The image header could not be read: {error}"
+msgstr ""
+
+#: src/splitter.rs:426
+msgid "Image dimensions could not be verified safely before loading. PNG, JPEG and TIFF are supported."
+msgstr ""
+
+#: src/splitter.rs:543
+msgid "The scanned image has an invalid format or inconsistent dimensions."
+msgstr ""
+
+#: src/splitter.rs:909
+msgid "Publishing failed ({publish_error}); rollback also failed ({rollback_error})"
+msgstr ""
+
+#: src/splitter.rs:945
+msgid "No available file name could be determined."
+msgstr ""
+
+#: src/splitter.rs:1069
+msgid "The image could not be saved: {path}"
+msgstr ""
+
+#: src/splitter.rs:1281
+msgid "Exactly one preview region must be supplied for each exported photo."
+msgstr ""
+
+#: src/splitter.rs:1309
+msgid "preview"
+msgstr ""

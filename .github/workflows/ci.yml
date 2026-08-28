@@ -17,7 +17,7 @@ jobs:
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel rust clang pkgconf gtk4 libadwaita opencv sane exiv2
-          desktop-file-utils appstream cargo-audit
+          desktop-file-utils appstream gettext cargo-audit
       - name: Quality checks
         run: make check
       - name: Dependency audit

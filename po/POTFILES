@@ -1,0 +1,8 @@
+src/main.rs
+src/cli.rs
+src/gui.rs
+src/gui_settings.rs
+src/i18n.rs
+src/metadata.rs
+src/scanner.rs
+src/splitter.rs

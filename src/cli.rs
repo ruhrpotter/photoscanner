@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use photoscanner::default_output_directory;
+use photoscanner::i18n::{tr, tr_args, trn};
 use photoscanner::scanner::{DEVICE_DISCOVERY_TIMEOUT, list_devices, scan_to_file};
 use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
 use tempfile::TempDir;
@@ -13,7 +14,7 @@ use tempfile::TempDir;
 #[command(
     name = "photoscanner",
     version,
-    about = "Papierfotos scannen, erkennen und einzeln speichern"
+    about = "Scan, detect and save paper photos individually"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -22,11 +23,11 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Native GTK4-Oberfläche öffnen
+    /// Open the native GTK4 interface
     Gui,
-    /// Von SANE erkannte Scanner anzeigen
+    /// Show scanners detected by SANE
     Devices,
-    /// Vorhandene Scandatei automatisch aufteilen
+    /// Split existing scanned files automatically
     Split {
         #[arg(required = true, num_args = 1..)]
         sources: Vec<PathBuf>,
@@ -35,7 +36,7 @@ pub enum Command {
         #[command(flatten)]
         export: ExportOptions,
     },
-    /// Scannen und gefundene Papierfotos automatisch aufteilen
+    /// Scan and split detected paper photos automatically
     Scan {
         #[command(flatten)]
         scanner: ScannerOptions,
@@ -44,7 +45,7 @@ pub enum Command {
         #[command(flatten)]
         export: ExportOptions,
     },
-    /// Gesamte Scanfläche ohne Fotoanalyse speichern
+    /// Save the full scan bed without photo analysis
     ScanFull {
         #[command(flatten)]
         scanner: ScannerOptions,
@@ -73,7 +74,7 @@ impl From<FormatArgument> for OutputFormat {
 
 fn parse_date(value: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(value, "%d.%m.%Y")
-        .map_err(|_| "Datum muss als TT.MM.JJJJ angegeben werden, z. B. 01.09.1995".to_string())
+        .map_err(|_| "Date must use DD.MM.YYYY, e.g. 01.09.1995".to_string())
 }
 
 #[derive(Clone, Debug, Args)]
@@ -82,7 +83,7 @@ pub struct ExportOptions {
         short,
         long,
         value_name = "ORDNER",
-        help = "Ausgabeordner (Standard: Bilder/PhotoScanner)"
+        help = "Output directory (default: Pictures/PhotoScanner)"
     )]
     output: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t)]
@@ -136,7 +137,10 @@ fn scanner_name(options: &ScannerOptions) -> Result<String> {
     let Some(device) = devices.first() else {
         bail!("SANE hat keinen Scanner gefunden.");
     };
-    println!("Verwende Scanner: {}", device.label());
+    println!(
+        "{}",
+        tr_args("Using scanner: {scanner}", &[("scanner", device.label())])
+    );
     Ok(device.name.clone())
 }
 
@@ -144,7 +148,13 @@ fn acquire(options: &ScannerOptions) -> Result<(TempDir, PathBuf)> {
     let device = scanner_name(options)?;
     let temporary = TempDir::with_prefix("photoscanner-")?;
     let scan = temporary.path().join("scan.png");
-    println!("Scanne mit {} dpi ...", options.dpi);
+    println!(
+        "{}",
+        tr_args(
+            "Scanning at {dpi} dpi ...",
+            &[("dpi", options.dpi.to_string())]
+        )
+    );
     scan_to_file(&scan, Some(&device), options.dpi, Duration::from_secs(600))?;
     Ok((temporary, scan))
 }
@@ -155,7 +165,7 @@ pub fn run(command: Command) -> Result<()> {
         Command::Devices => {
             let devices = list_devices(DEVICE_DISCOVERY_TIMEOUT)?;
             if devices.is_empty() {
-                bail!("Kein Scanner erkannt.");
+                bail!(tr("No scanner detected."));
             }
             for device in devices {
                 println!(
@@ -176,7 +186,10 @@ pub fn run(command: Command) -> Result<()> {
             let config = config(&export, Some(&split), None);
             let mut failed = 0usize;
             for source in &sources {
-                println!("Datei: {}", source.display());
+                println!(
+                    "{}",
+                    tr_args("File: {path}", &[("path", source.display().to_string())])
+                );
                 match split_scan(
                     source,
                     &output,
@@ -187,15 +200,27 @@ pub fn run(command: Command) -> Result<()> {
                     Ok(result) => print_split_result(&result),
                     Err(error) => {
                         failed += 1;
-                        eprintln!("Fehler bei {}: {error}", source.display());
+                        eprintln!(
+                            "{}",
+                            tr_args(
+                                "Error processing {path}: {error}",
+                                &[
+                                    ("path", source.display().to_string()),
+                                    ("error", error.to_string()),
+                                ],
+                            )
+                        );
                     }
                 }
             }
             if failed > 0 {
-                bail!(
-                    "{failed} von {} Dateien konnten nicht verarbeitet werden",
-                    sources.len()
-                );
+                bail!(tr_args(
+                    "{failed} of {total} files could not be processed",
+                    &[
+                        ("failed", failed.to_string()),
+                        ("total", sources.len().to_string()),
+                    ],
+                ));
             }
         }
         Command::Scan {
@@ -229,22 +254,47 @@ pub fn run(command: Command) -> Result<()> {
                 &config(&export, None, Some(scanner.dpi)),
                 export.prefix.as_deref(),
             )
-            .context("Vollständiger Scan konnte nicht gespeichert werden")?;
-            println!("Vollständiger Scan gespeichert:\n{}", path.display());
+            .with_context(|| tr("The full scan could not be saved"))?;
+            println!(
+                "{}",
+                tr_args(
+                    "Full scan saved:\n{path}",
+                    &[("path", path.display().to_string())],
+                )
+            );
         }
     }
     Ok(())
 }
 
 fn print_split_result(result: &photoscanner::splitter::SplitResult) {
-    println!("{} Foto(s) gespeichert:", result.files.len());
+    println!(
+        "{}",
+        trn(
+            "One photo saved:",
+            "{count} photos saved:",
+            result.files.len()
+        )
+    );
     for path in &result.files {
         println!("{}", path.display());
     }
     if let Some(preview) = &result.preview {
-        println!("Vorschau: {}", preview.display());
+        println!(
+            "{}",
+            tr_args(
+                "Preview: {path}",
+                &[("path", preview.display().to_string())]
+            )
+        );
     }
-    println!("Erkennungsschwellwert: {:.1}", result.threshold_used);
+    println!(
+        "{}",
+        tr_args(
+            "Detection threshold: {threshold}",
+            &[("threshold", format!("{:.1}", result.threshold_used))],
+        )
+    );
 }
 
 #[cfg(test)]

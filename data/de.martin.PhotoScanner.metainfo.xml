@@ -4,17 +4,21 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Photo Scanner</name>
-  <summary>Papierfotos scannen, erkennen und einzeln archivieren</summary>
+  <name xml:lang="de">Photo Scanner</name>
+  <summary>Scan, detect, and archive paper photos individually</summary>
+  <summary xml:lang="de">Papierfotos scannen, erkennen und einzeln archivieren</summary>
   <description>
     <p>
-      Photo Scanner digitalisiert Papierfotos über SANE, erkennt mehrere
-      aufgelegte Fotos und speichert sie einzeln mit Aufnahmedatum und
-      Auflösungsmetadaten.
+      Photo Scanner digitizes paper photos through SANE, detects multiple
+      photos on the scanner bed, and saves each one with capture date and
+      resolution metadata.
     </p>
     <p>
-      Vorhandene PNG-, JPEG- und TIFF-Scans können ebenfalls importiert werden.
-      Alternativ lässt sich die vollständige Scanfläche unverändert exportieren.
+      Existing PNG, JPEG, and TIFF scans can also be imported. Alternatively,
+      the complete scan area can be exported unchanged.
     </p>
+    <p xml:lang="de">Photo Scanner digitalisiert Papierfotos über SANE, erkennt mehrere aufgelegte Fotos und speichert sie einzeln mit Aufnahmedatum und Auflösungsmetadaten.</p>
+    <p xml:lang="de">Vorhandene PNG-, JPEG- und TIFF-Scans können ebenfalls importiert werden. Alternativ lässt sich die vollständige Scanfläche unverändert exportieren.</p>
   </description>
   <launchable type="desktop-id">de.martin.PhotoScanner.desktop</launchable>
   <provides>
@@ -27,7 +31,8 @@
   <releases>
     <release version="0.2.0" date="2026-08-06">
       <description>
-        <p>Native GTK4-Oberfläche mit automatischer Fotoerkennung und Metadatenexport.</p>
+        <p>Native GTK4 interface with automatic photo detection and metadata export.</p>
+        <p xml:lang="de">Native GTK4-Oberfläche mit automatischer Fotoerkennung und Metadatenexport.</p>
       </description>
     </release>
   </releases>

@@ -1,99 +1,73 @@
 # Photo Scanner
 
-Photo Scanner ist eine native Linux-Anwendung zum Digitalisieren von
-Papierfotos. Sie scannt über SANE, erkennt mehrere gleichzeitig aufgelegte
-Fotos, begradigt sie und speichert jedes Foto mit PhotoPrism-kompatiblen
-Aufnahmedaten. Alternativ lässt sich die gesamte Scanfläche unverändert als eine
-Datei speichern.
+[Deutsch](README.de.md) | **English**
 
-Die Anwendung ist vollständig in Rust geschrieben. Die Oberfläche verwendet
-GTK4 und Libadwaita, läuft nativ unter Wayland und passt deshalb gut zu CachyOS,
-niri und Noctalia. Alle längeren Scanner- und OpenCV-Arbeiten laufen außerhalb
-des GUI-Threads.
+Photo Scanner is a native Linux application for digitizing paper photos. It
+scans through SANE, detects several photos placed on the scanner bed, corrects
+their perspective, and saves every photo with PhotoPrism-compatible capture
+metadata. It can also save the complete scan area unchanged.
 
-## Funktionen
+The application is written in Rust. Its GTK4 and Libadwaita interface runs
+natively on Wayland, while scanner and OpenCV work stays off the GUI thread.
 
-- moderne, responsive GTK4-Oberfläche
-- SANE-/AirScan-Scanner auswählen und ohne erneute Gerätesuche weiterverwenden
-- 300, 600 oder 1200 dpi
-- automatische Fotoerkennung, Perspektivkorrektur und Begradigung
-- vollständige Scanfläche ohne Erkennung speichern
-- vorhandene PNG-, JPEG- oder TIFF-Scans importieren
-- JPG, PNG und verlustfrei komprimiertes TIFF exportieren
-- EXIF-Aufnahmedatum, Zeitzonenoffset, Softwarekennung und DPI schreiben
-- vorhandene Dateien niemals überschreiben und Ausgabegruppen bei Fehlern zurückrollen
-- markierte Kontrollvorschau erzeugen
-- laufende Scannerprozesse per `Esc` abbrechen und zuverlässig aufräumen
-- System-Dark-Mode und System-Akzentfarbe übernehmen
-- eigenes CSS-Theme unter `~/.config/photoscanner/theme.css` live nachladen
-- Noctalia-v5-Paletten über ein mitgeliefertes App-Theming-Template übernehmen
-- CLI für Automatisierung und Stapelverarbeitung erhalten
+## Features
 
-## Voraussetzungen auf CachyOS/Arch
+- responsive GTK4 interface with persistent settings
+- SANE and AirScan discovery at 300, 600, or 1200 dpi
+- automatic photo detection, perspective correction, and deskewing
+- review detected photos before saving; rotate or exclude individual photos
+- batch import PNG, JPEG, and TIFF scans
+- export JPG, PNG, or losslessly compressed TIFF
+- write EXIF capture date, time-zone offset, software identity, and DPI
+- never overwrite existing files; roll back incomplete output groups
+- cancel scanner processes and report live scan progress
+- zoom and pan previews
+- system color-scheme and accent-color integration
+- live-reloaded custom CSS and a Noctalia v5 template
+- CLI automation and batch processing
+- English and German interface selected from the process locale
+
+## Requirements on CachyOS/Arch
 
 ```bash
-sudo pacman -S --needed rust clang gtk4 libadwaita opencv sane sane-airscan exiv2
+sudo pacman -S --needed rust clang gtk4 libadwaita opencv sane sane-airscan exiv2 gettext
 ```
 
-Ob SANE den Scanner erkennt:
+Check whether SANE sees the scanner with `scanimage -L`. The project targets
+the current CachyOS OpenCV 5 stack and uses its `opencv5` pkg-config name.
 
-```bash
-scanimage -L
-```
-
-Das Projekt ist auf den aktuellen CachyOS-Stack mit OpenCV 5 ausgerichtet und
-verwendet deshalb dessen pkg-config-Namen `opencv5`.
-
-## Starten
-
-Direkt aus dem Projekt:
+## Run and install
 
 ```bash
 make run
-```
-
-Oder zunächst als Release-Build installieren:
-
-```bash
 make install-user
 ```
 
-Danach steht **Photo Scanner** im App-Launcher zur Verfügung. Im Terminal lässt
-sich die GUI mit `photoscanner gui` starten.
+The user installation adds the application, desktop metadata, icon, and German
+gettext catalog. Start the installed GUI with `photoscanner gui`.
 
-## Bedienung
+## Using the GUI
 
-1. Scanner auswählen und Fotos mit ungefähr 1 cm Abstand auflegen.
-2. Aufnahmedatum, Auflösung und Ausgabeformat einstellen.
-3. `Fotos automatisch trennen` oder `Gesamte Scanfläche speichern` auswählen.
-4. Scan starten und die markierte Vorschau kontrollieren.
+1. Select a scanner and place photos about 1 cm apart.
+2. Choose the capture date, resolution, output format, and folder.
+3. Select automatic separation or the complete scan area.
+4. Scan, review the detected photos, rotate or deselect them, and save.
 
-Die Oberfläche bleibt während Scan und Bildverarbeitung reaktionsfähig. Ein
-laufender Vorgang lässt sich mit `Esc` abbrechen. Mit `F9` wird ein Scan
-gestartet, `Strg+O` importiert eine oder mehrere Dateien und `Strg+L` wählt den Ausgabeordner.
-Bei einem schmalen niri-Tile wird die Einstellungsseite automatisch als
-einblendbare Seitenleiste dargestellt.
+The interface stays responsive during work. `Escape` cancels an operation,
+`F9` starts a scan, `Ctrl+O` imports one or more files, and `Ctrl+L` selects the
+output folder. Starting a new scan discards an open review. Disable **Review
+before saving** to use direct export.
 
-Erkannte Fotos werden standardmäßig vor dem Speichern als Miniaturen gezeigt.
-Dort lassen sie sich abwählen oder in 90-Grad-Schritten drehen. `F9` verwirft
-eine offene Prüfung und startet einen neuen Scan. Die Option
-**Vor dem Speichern prüfen** kann für den bisherigen direkten Export abgeschaltet
-werden.
+## Themes and Noctalia
 
-## Themes und Noctalia
-
-GTK4/Libadwaita übernimmt standardmäßig Hell-/Dunkelmodus, Kontrastpräferenz
-und Akzentfarbe des Systems. Zusätzlich lädt Photo Scanner diese Datei:
+GTK4 and Libadwaita follow the system light/dark mode, contrast preference, and
+accent color. Photo Scanner additionally loads and watches:
 
 ```text
 ~/.config/photoscanner/theme.css
 ```
 
-Änderungen werden nach dem Schreiben der Datei automatisch übernommen. Fehler
-beim Lesen oder Parsen zeigt die Anwendung im Statusbereich an. Ein manuelles
-Beispiel liegt in `docs/theme.css.example`.
-
-Für Noctalia v5:
+An example is available at `docs/theme.css.example`. For Noctalia v5:
 
 ```bash
 mkdir -p ~/.config/noctalia/templates
@@ -102,68 +76,37 @@ cp docs/noctalia/photoscanner.toml ~/.config/noctalia/photoscanner.toml
 noctalia theme --list-templates
 ```
 
-Anschließend in Noctalia unter **Media & UI → Theme** das Theme erneut anwenden.
-Noctalia rendert dann die aktive Material-Palette nach
-`~/.config/photoscanner/theme.css`. Ein Neustart der Anwendung ist nicht nötig.
+Reapply the theme under **Media & UI → Theme**. No restart is needed when the
+generated CSS changes.
 
-## Kommandozeile
-
-Scanner anzeigen:
+## Command line
 
 ```bash
 photoscanner devices
-```
-
-Scannen und automatisch trennen:
-
-```bash
-photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Bilder/Archiv
-```
-
-Gesamte Scanfläche speichern:
-
-```bash
-photoscanner scan-full --dpi 600 --format tif --output ~/Bilder/Archiv
-```
-
-Vorhandene Dateien einzeln trennen:
-
-```bash
-photoscanner split scan-1.png scan-2.png --output ~/Bilder/Archiv --threshold 10
-```
-
-Die Oberfläche unterstützt beim Import ebenfalls eine Mehrfachauswahl. Fehler
-in einzelnen Dateien stoppen den restlichen Stapel nicht.
-
-Ohne `--output` verwenden CLI und Oberfläche gemeinsam den Ordner
-`~/Bilder/PhotoScanner` (oder `output/PhotoScanner`, wenn kein Bilderordner
-ermittelt werden kann).
-
-Alle Befehle und Optionen:
-
-```bash
+photoscanner scan --dpi 600 --date 01.09.1995 --output ~/Pictures/Archive
+photoscanner scan-full --dpi 600 --format tif --output ~/Pictures/Archive
+photoscanner split scan-1.png scan-2.png --output ~/Pictures/Archive --threshold 10
 photoscanner --help
 ```
 
-## Qualitätssicherung
+Batch splitting continues after an individual file fails and returns a non-zero
+status if any file failed. Without `--output`, the CLI and GUI share
+`~/Pictures/PhotoScanner` (or `output/PhotoScanner` when no pictures directory
+can be determined). CLI help is English; runtime messages follow the locale.
 
-Für alle lokalen Prüfwerkzeuge:
+## Quality checks
 
 ```bash
-sudo pacman -S --needed desktop-file-utils appstream cargo-audit
-```
-
-```bash
+sudo pacman -S --needed desktop-file-utils appstream gettext cargo-audit
 make check
 make audit
 ```
 
-Die Rust-Tests erzeugen synthetische Scans und prüfen unter anderem Erkennung,
-Begradigung, eng nebeneinanderliegende Fotos, Scanner-Ränder, kollisionsfreie
-Dateinamen, parallele Exporte, Prozessabbruch, Ressourcenlimits sowie EXIF- und
-DPI-Metadaten für JPG, PNG und TIFF. Dieselben Prüfungen laufen bei Pushes und
-Pull Requests in GitHub Actions.
+`make check` validates formatting, Clippy, tests, CLI help, the German catalog,
+desktop metadata, and AppStream metadata. Tests cover detection, deskewing,
+collision-free publishing and rollback, cancellation, resource limits, review
+export, and metadata.
 
-## Lizenz
+## License
 
-Photo Scanner steht unter der MIT-Lizenz. Details enthält `LICENSE`.
+Photo Scanner is licensed under the MIT License. See `LICENSE`.
