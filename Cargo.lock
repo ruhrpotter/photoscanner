@@ -960,6 +960,7 @@ dependencies = [
  "crc32fast",
  "dirs",
  "filetime",
+ "gdk-pixbuf",
  "gtk4",
  "libadwaita",
  "opencv",

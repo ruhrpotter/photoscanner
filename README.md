@@ -74,6 +74,12 @@ gestartet, `Strg+O` importiert eine oder mehrere Dateien und `Strg+L` wählt den
 Bei einem schmalen niri-Tile wird die Einstellungsseite automatisch als
 einblendbare Seitenleiste dargestellt.
 
+Erkannte Fotos werden standardmäßig vor dem Speichern als Miniaturen gezeigt.
+Dort lassen sie sich abwählen oder in 90-Grad-Schritten drehen. `F9` verwirft
+eine offene Prüfung und startet einen neuen Scan. Die Option
+**Vor dem Speichern prüfen** kann für den bisherigen direkten Export abgeschaltet
+werden.
+
 ## Themes und Noctalia
 
 GTK4/Libadwaita übernimmt standardmäßig Hell-/Dunkelmodus, Kontrastpräferenz

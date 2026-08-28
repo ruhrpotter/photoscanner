@@ -19,6 +19,7 @@ pub struct PersistedSettings {
     pub padding: f64,
     pub auto_threshold: bool,
     pub threshold: f64,
+    pub review_before_save: bool,
     pub capture_date: Option<NaiveDate>,
 }
 
@@ -34,6 +35,7 @@ impl Default for PersistedSettings {
             padding: 1.2,
             auto_threshold: true,
             threshold: 12.0,
+            review_before_save: true,
             capture_date: None,
         }
     }
@@ -73,6 +75,9 @@ impl PersistedSettings {
                 .boolean(GROUP, "auto_threshold")
                 .unwrap_or(defaults.auto_threshold),
             threshold: read_double(&key_file, "threshold", defaults.threshold, 1.0, 255.0),
+            review_before_save: key_file
+                .boolean(GROUP, "review_before_save")
+                .unwrap_or(defaults.review_before_save),
             capture_date,
         }
     }
@@ -100,6 +105,7 @@ impl PersistedSettings {
         key_file.set_double(GROUP, "padding", self.padding);
         key_file.set_boolean(GROUP, "auto_threshold", self.auto_threshold);
         key_file.set_double(GROUP, "threshold", self.threshold);
+        key_file.set_boolean(GROUP, "review_before_save", self.review_before_save);
         if let Some(date) = self.capture_date {
             key_file.set_string(GROUP, "capture_date", &date.format("%Y-%m-%d").to_string());
         }
@@ -149,6 +155,7 @@ mod tests {
             padding: 2.4,
             auto_threshold: false,
             threshold: 42.0,
+            review_before_save: false,
             capture_date: NaiveDate::from_ymd_opt(1995, 9, 1),
         };
 

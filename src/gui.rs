@@ -10,9 +10,10 @@ use adw::prelude::*;
 use anyhow::{Context, Result, anyhow, bail};
 use async_channel::Sender;
 use chrono::{Datelike, Local, NaiveDate};
+use gdk_pixbuf::{Pixbuf, PixbufRotation};
 use gtk::gio;
 use gtk::glib;
-use opencv::core::{Size, Vector};
+use opencv::core::{self, Size, Vector};
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
@@ -20,7 +21,10 @@ use photoscanner::scanner::{
     DEVICE_DISCOVERY_TIMEOUT, ScannerCancellation, ScannerDevice, list_devices_cancellable,
     scan_to_file_with_progress,
 };
-use photoscanner::splitter::{OutputFormat, SplitConfig, save_full_scan, split_scan};
+use photoscanner::splitter::{
+    AnalyzedScan, DetectedRegion, OutputFormat, SplitConfig, analyze_scan, export_photos,
+    save_detection_preview, save_full_scan, split_scan, warp_detected_photo,
+};
 use photoscanner::{APP_ID, APP_NAME};
 use tempfile::TempDir;
 
@@ -38,6 +42,7 @@ struct Ui {
     device_model: gtk::StringList,
     device_dropdown: adw::ComboRow,
     mode_dropdown: adw::ComboRow,
+    review_before_save: gtk::Switch,
     dpi_dropdown: adw::ComboRow,
     format_dropdown: adw::ComboRow,
     date_entry: adw::EntryRow,
@@ -57,6 +62,9 @@ struct Ui {
     preview_stack: gtk::Stack,
     picture: gtk::Picture,
     preview_scroller: gtk::ScrolledWindow,
+    review_overview: gtk::Picture,
+    review_flow: gtk::FlowBox,
+    review_save_button: gtk::Button,
     zoom: Rc<Cell<f64>>,
     devices: Rc<RefCell<Vec<ScannerDevice>>>,
     output_directory: Rc<RefCell<PathBuf>>,
@@ -70,6 +78,7 @@ struct Ui {
     settings_path: PathBuf,
     last_capture_date: Rc<Cell<Option<NaiveDate>>>,
     last_error: Rc<RefCell<Option<String>>>,
+    review_state: Rc<RefCell<Option<StoredReview>>>,
     preview_directory: Rc<RefCell<Option<TempDir>>>,
     theme_monitor: Rc<RefCell<Option<gio::FileMonitor>>>,
     scan_action: gio::SimpleAction,
@@ -80,6 +89,8 @@ struct Ui {
     zoom_in_action: gio::SimpleAction,
     zoom_out_action: gio::SimpleAction,
     zoom_fit_action: gio::SimpleAction,
+    save_review_action: gio::SimpleAction,
+    discard_review_action: gio::SimpleAction,
 }
 
 enum Message {
@@ -90,6 +101,10 @@ enum Message {
     Status {
         operation_id: u64,
         text: String,
+    },
+    ReviewReady {
+        operation_id: u64,
+        result: Result<ReviewData, String>,
     },
     Devices {
         operation_id: u64,
@@ -107,6 +122,49 @@ struct WorkResult {
     preview: PathBuf,
     preview_directory: TempDir,
     capture_date: NaiveDate,
+}
+
+enum ScanOutcome {
+    Work(WorkResult),
+    Review(ReviewData),
+}
+
+#[derive(Clone, Copy)]
+enum ScanMode {
+    Direct,
+    Review,
+    Full,
+}
+
+struct ReviewPhotoData {
+    full_path: PathBuf,
+    thumbnail_path: PathBuf,
+    group_index: usize,
+    region: DetectedRegion,
+}
+
+struct ReviewGroup {
+    analyzed: AnalyzedScan,
+}
+
+struct ReviewData {
+    _staging: TempDir,
+    photos: Vec<ReviewPhotoData>,
+    groups: Vec<ReviewGroup>,
+    overview: PathBuf,
+    config: SplitConfig,
+    output: PathBuf,
+    failures: Vec<String>,
+}
+
+struct ReviewSelection {
+    include: Rc<Cell<bool>>,
+    quarter_turns: Rc<Cell<u8>>,
+}
+
+struct StoredReview {
+    data: ReviewData,
+    selections: Vec<ReviewSelection>,
 }
 
 pub fn run() {
@@ -279,6 +337,10 @@ fn build_window(application: &adw::Application) {
         .model(&mode_model)
         .selected(persisted_settings.mode_index)
         .build();
+    let review_before_save = gtk::Switch::builder()
+        .active(persisted_settings.review_before_save)
+        .valign(gtk::Align::Center)
+        .build();
 
     let dpi_model = gtk::StringList::new(&["300 dpi", "600 dpi", "1200 dpi"]);
     let dpi_dropdown = adw::ComboRow::builder()
@@ -408,15 +470,27 @@ fn build_window(application: &adw::Application) {
         .hexpand(true)
         .build();
     status_label.set_accessible_role(gtk::AccessibleRole::Status);
-    let (preview_stack, picture, preview_scroller) = build_preview();
+    let (
+        preview_stack,
+        picture,
+        preview_scroller,
+        review_overview,
+        review_flow,
+        review_save_button,
+    ) = build_preview();
     let zoom = Rc::new(Cell::new(0.0));
+    let review_state = Rc::new(RefCell::new(None));
 
     let zoom_in_action = gio::SimpleAction::new("zoom-in", None);
     let zoom_out_action = gio::SimpleAction::new("zoom-out", None);
     let zoom_fit_action = gio::SimpleAction::new("zoom-fit", None);
+    let save_review_action = gio::SimpleAction::new("save-review", None);
+    let discard_review_action = gio::SimpleAction::new("discard-review", None);
     zoom_in_action.set_enabled(false);
     zoom_out_action.set_enabled(false);
     zoom_fit_action.set_enabled(false);
+    save_review_action.set_enabled(false);
+    discard_review_action.set_enabled(false);
 
     let ui = Rc::new(Ui {
         window: window.clone(),
@@ -425,6 +499,7 @@ fn build_window(application: &adw::Application) {
         device_model,
         device_dropdown,
         mode_dropdown,
+        review_before_save,
         dpi_dropdown,
         format_dropdown,
         date_entry,
@@ -444,6 +519,9 @@ fn build_window(application: &adw::Application) {
         preview_stack,
         picture,
         preview_scroller,
+        review_overview,
+        review_flow,
+        review_save_button,
         zoom,
         devices,
         output_directory,
@@ -457,6 +535,7 @@ fn build_window(application: &adw::Application) {
         settings_path,
         last_capture_date,
         last_error,
+        review_state,
         preview_directory,
         theme_monitor,
         scan_action,
@@ -467,6 +546,8 @@ fn build_window(application: &adw::Application) {
         zoom_in_action,
         zoom_out_action,
         zoom_fit_action,
+        save_review_action,
+        discard_review_action,
     });
 
     split_view.set_sidebar(Some(&build_sidebar(&ui)));
@@ -545,6 +626,13 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     refresh_row.set_activatable_widget(Some(&ui.refresh_button));
     scanner_group.add(&refresh_row);
     scanner_group.add(&ui.mode_dropdown);
+    let review_row = adw::ActionRow::builder()
+        .title("Vor dem Speichern prüfen")
+        .subtitle("Erkannte Fotos auswählen und drehen")
+        .build();
+    review_row.add_suffix(&ui.review_before_save);
+    review_row.set_activatable_widget(Some(&ui.review_before_save));
+    scanner_group.add(&review_row);
     scanner_group.add(&ui.dpi_dropdown);
     scanner_group.add(&ui.date_entry);
     content.append(&scanner_group);
@@ -634,7 +722,14 @@ fn row_with_suffix(
     row
 }
 
-fn build_preview() -> (gtk::Stack, gtk::Picture, gtk::ScrolledWindow) {
+fn build_preview() -> (
+    gtk::Stack,
+    gtk::Picture,
+    gtk::ScrolledWindow,
+    gtk::Picture,
+    gtk::FlowBox,
+    gtk::Button,
+) {
     let picture = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
         .can_shrink(true)
@@ -645,6 +740,53 @@ fn build_preview() -> (gtk::Stack, gtk::Picture, gtk::ScrolledWindow) {
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .child(&picture)
+        .build();
+
+    let review_overview = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Contain)
+        .can_shrink(true)
+        .height_request(280)
+        .hexpand(true)
+        .build();
+    let review_flow = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .row_spacing(12)
+        .column_spacing(12)
+        .max_children_per_line(4)
+        .min_children_per_line(1)
+        .homogeneous(true)
+        .build();
+    let review_title = gtk::Label::builder()
+        .label("Erkannte Fotos prüfen")
+        .xalign(0.0)
+        .hexpand(true)
+        .build();
+    review_title.add_css_class("title-2");
+    let review_save_button = gtk::Button::builder()
+        .label("Fotos speichern")
+        .action_name("win.save-review")
+        .build();
+    review_save_button.add_css_class("suggested-action");
+    let review_discard_button = gtk::Button::builder()
+        .label("Verwerfen")
+        .action_name("win.discard-review")
+        .build();
+    let review_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    review_actions.append(&review_title);
+    review_actions.append(&review_discard_button);
+    review_actions.append(&review_save_button);
+    let review_content = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    review_content.set_margin_top(16);
+    review_content.set_margin_bottom(16);
+    review_content.set_margin_start(16);
+    review_content.set_margin_end(16);
+    review_content.append(&review_actions);
+    review_content.append(&review_overview);
+    review_content.append(&review_flow);
+    let review_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&review_content)
         .build();
 
     let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -674,8 +816,16 @@ fn build_preview() -> (gtk::Stack, gtk::Picture, gtk::ScrolledWindow) {
         .build();
     stack.add_named(&empty, Some("empty"));
     stack.add_named(&scroller, Some("picture"));
+    stack.add_named(&review_scroller, Some("review"));
     stack.set_visible_child_name("empty");
-    (stack, picture, scroller)
+    (
+        stack,
+        picture,
+        scroller,
+        review_overview,
+        review_flow,
+        review_save_button,
+    )
 }
 
 fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
@@ -839,6 +989,19 @@ fn connect_actions(ui: &Rc<Ui>) {
         }
     });
 
+    let weak_ui = Rc::downgrade(ui);
+    ui.save_review_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            save_review(&ui);
+        }
+    });
+    let weak_ui = Rc::downgrade(ui);
+    ui.discard_review_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak_ui.upgrade() {
+            discard_review(&ui);
+        }
+    });
+
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     let weak_ui = Rc::downgrade(ui);
     scroll.connect_scroll(move |controller, _, dy| {
@@ -866,6 +1029,8 @@ fn connect_actions(ui: &Rc<Ui>) {
     ui.window.add_action(&ui.zoom_in_action);
     ui.window.add_action(&ui.zoom_out_action);
     ui.window.add_action(&ui.zoom_fit_action);
+    ui.window.add_action(&ui.save_review_action);
+    ui.window.add_action(&ui.discard_review_action);
 
     if let Some(application) = ui.window.application() {
         application.set_accels_for_action("win.scan", &["F9"]);
@@ -889,6 +1054,7 @@ fn update_control_states(ui: &Ui) {
         .set_sensitive(splitting && !ui.auto_threshold.is_active());
     ui.min_area.set_sensitive(splitting);
     ui.padding.set_sensitive(splitting);
+    ui.review_before_save.set_sensitive(splitting);
     ui.quality
         .set_sensitive(idle && ui.format_dropdown.selected() == 0);
 }
@@ -1067,9 +1233,20 @@ fn start_scan(ui: &Ui) {
         }
     };
     let full_scan = ui.mode_dropdown.selected() == 1;
+    let review = !full_scan && ui.review_before_save.is_active();
+    let scan_mode = if full_scan {
+        ScanMode::Full
+    } else if review {
+        ScanMode::Review
+    } else {
+        ScanMode::Direct
+    };
     let dpi = config.dpi.unwrap_or(600);
     let output = ui.output_directory.borrow().clone();
     let sender = ui.sender.clone();
+    if drop_review(ui) {
+        show_previous_preview(ui);
+    }
     let (operation_id, cancellation) = begin_operation(ui);
     set_busy(ui, true, &format!("Scanne mit {dpi} dpi …"));
     ui.spinner.stop();
@@ -1089,7 +1266,7 @@ fn start_scan(ui: &Ui) {
                 dpi,
                 &output,
                 &config,
-                full_scan,
+                scan_mode,
                 &cancellation,
                 Some(progress),
             )
@@ -1101,10 +1278,21 @@ fn start_scan(ui: &Ui) {
                 }
             })
         });
-        let _ = sender.send_blocking(Message::Work {
-            operation_id,
-            result,
-        });
+        let message = match result {
+            Ok(ScanOutcome::Work(result)) => Message::Work {
+                operation_id,
+                result: Ok(result),
+            },
+            Ok(ScanOutcome::Review(review)) => Message::ReviewReady {
+                operation_id,
+                result: Ok(review),
+            },
+            Err(error) => Message::Work {
+                operation_id,
+                result: Err(error),
+            },
+        };
+        let _ = sender.send_blocking(message);
     });
 }
 
@@ -1113,10 +1301,10 @@ fn scan_work(
     dpi: u32,
     output: &Path,
     config: &SplitConfig,
-    full_scan: bool,
+    mode: ScanMode,
     cancellation: &ScannerCancellation,
     progress: Option<Box<dyn Fn(f64) + Send>>,
-) -> Result<WorkResult> {
+) -> Result<ScanOutcome> {
     ensure_not_cancelled(cancellation)?;
     let temporary = TempDir::with_prefix("photoscanner-")?;
     let source = temporary.path().join("scan.png");
@@ -1129,11 +1317,11 @@ fn scan_work(
         progress,
     )?;
     ensure_not_cancelled(cancellation)?;
-    if full_scan {
+    if matches!(mode, ScanMode::Full) {
         let path = save_full_scan(&source, output, config, None)?;
         ensure_not_cancelled(cancellation)?;
         let (preview, preview_directory) = bounded_preview(&path)?;
-        return Ok(WorkResult {
+        return Ok(ScanOutcome::Work(WorkResult {
             title: "Vollständiger Scan gespeichert".to_string(),
             detail: path.display().to_string(),
             preview,
@@ -1141,7 +1329,17 @@ fn scan_work(
             capture_date: config
                 .capture_date
                 .unwrap_or_else(|| Local::now().date_naive()),
-        });
+        }));
+    }
+    if matches!(mode, ScanMode::Review) {
+        return prepare_review(
+            std::slice::from_ref(&source),
+            output,
+            config,
+            cancellation,
+            None,
+        )
+        .map(ScanOutcome::Review);
     }
     let result = split_scan(&source, output, config, None, true)?;
     ensure_not_cancelled(cancellation)?;
@@ -1151,7 +1349,7 @@ fn scan_work(
         .or_else(|| result.files.first().cloned())
         .ok_or_else(|| anyhow!("Keine Vorschaudatei erzeugt"))?;
     let (preview, preview_directory) = bounded_preview(&preview_source)?;
-    Ok(WorkResult {
+    Ok(ScanOutcome::Work(WorkResult {
         title: format!("{} Foto(s) gespeichert", result.files.len()),
         detail: format!(
             "{} · Schwellwert {:.1}",
@@ -1163,7 +1361,7 @@ fn scan_work(
         capture_date: config
             .capture_date
             .unwrap_or_else(|| Local::now().date_naive()),
-    })
+    }))
 }
 
 fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
@@ -1178,11 +1376,44 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
         }
     };
     let full_scan = ui.mode_dropdown.selected() == 1;
+    let review = !full_scan && ui.review_before_save.is_active();
     let output = ui.output_directory.borrow().clone();
     let sender = ui.sender.clone();
+    if drop_review(ui) {
+        show_previous_preview(ui);
+    }
     let (operation_id, cancellation) = begin_operation(ui);
     set_busy(ui, true, "Analysiere Scandatei …");
     thread::spawn(move || {
+        if review {
+            let status_sender = sender.clone();
+            let result = run_worker(|| {
+                prepare_review(
+                    &sources,
+                    &output,
+                    &config,
+                    &cancellation,
+                    Some(Box::new(move |index, total| {
+                        let _ = status_sender.try_send(Message::Status {
+                            operation_id,
+                            text: format!("Analysiere Datei {index} von {total} …"),
+                        });
+                    })),
+                )
+                .map_err(|error| {
+                    if cancellation.is_cancelled() {
+                        CANCELLED_MESSAGE.to_string()
+                    } else {
+                        format!("{error:#}")
+                    }
+                })
+            });
+            let _ = sender.send_blocking(Message::ReviewReady {
+                operation_id,
+                result,
+            });
+            return;
+        }
         let result = run_worker(|| {
             (|| -> Result<WorkResult> {
                 let file_count = sources.len();
@@ -1273,6 +1504,129 @@ fn start_import(ui: &Ui, sources: Vec<PathBuf>) {
     });
 }
 
+fn prepare_review(
+    sources: &[PathBuf],
+    output: &Path,
+    config: &SplitConfig,
+    cancellation: &ScannerCancellation,
+    status: Option<Box<dyn Fn(usize, usize) + Send>>,
+) -> Result<ReviewData> {
+    let staging = TempDir::with_prefix("photoscanner-review-")?;
+    let mut photos = Vec::new();
+    let mut groups = Vec::new();
+    let mut failures = Vec::new();
+    let mut overview = None;
+    for (source_index, source) in sources.iter().enumerate() {
+        ensure_not_cancelled(cancellation)?;
+        if let Some(status) = status.as_deref() {
+            status(source_index + 1, sources.len());
+        }
+        let group_index = groups.len();
+        let prepared = (|| -> Result<(AnalyzedScan, Vec<ReviewPhotoData>, PathBuf)> {
+            let analyzed = analyze_scan(source, config)?;
+            let mut group_photos = Vec::new();
+            let mut group_regions = Vec::new();
+            for (region_index, region) in analyzed.regions.iter().enumerate() {
+                ensure_not_cancelled(cancellation)?;
+                let photo = warp_detected_photo(&analyzed, region)?;
+                if photo.rows().min(photo.cols()) < 10 {
+                    continue;
+                }
+                let full_path = staging
+                    .path()
+                    .join(format!("photo_{source_index:03}_{region_index:03}.png"));
+                if !imgcodecs::imwrite_def(&full_path, &photo)? {
+                    bail!("Prüffoto konnte nicht zwischengespeichert werden");
+                }
+                let thumbnail_path = staging
+                    .path()
+                    .join(format!("thumb_{source_index:03}_{region_index:03}.jpg"));
+                write_thumbnail(&photo, &thumbnail_path)?;
+                group_regions.push(region.clone());
+                group_photos.push(ReviewPhotoData {
+                    full_path,
+                    thumbnail_path,
+                    group_index,
+                    region: region.clone(),
+                });
+            }
+            if group_photos.is_empty() {
+                bail!("Keine ausreichend großen Fotos erkannt");
+            }
+            let overview_path = staging
+                .path()
+                .join(format!("overview_{source_index:03}.jpg"));
+            save_detection_preview(
+                &analyzed,
+                &group_regions,
+                &overview_path,
+                config.capture_date,
+            )?;
+            Ok((analyzed, group_photos, overview_path))
+        })();
+        match prepared {
+            Ok((analyzed, mut group_photos, overview_path)) => {
+                photos.append(&mut group_photos);
+                groups.push(ReviewGroup { analyzed });
+                overview = Some(overview_path);
+            }
+            Err(error) => {
+                if cancellation.is_cancelled() {
+                    return Err(error);
+                }
+                let name = source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Unbekannte Datei");
+                failures.push(format!("{name}: {}", error_summary(&format!("{error:#}"))));
+            }
+        }
+    }
+    ensure_not_cancelled(cancellation)?;
+    let Some(overview) = overview else {
+        bail!(
+            "Keine Datei konnte für die Prüfung vorbereitet werden:\n{}",
+            failures.join("\n")
+        );
+    };
+    Ok(ReviewData {
+        _staging: staging,
+        photos,
+        groups,
+        overview,
+        config: config.clone(),
+        output: output.to_path_buf(),
+        failures,
+    })
+}
+
+fn write_thumbnail(photo: &Mat, path: &Path) -> Result<()> {
+    const THUMBNAIL_MAX_EDGE: i32 = 360;
+    let largest_edge = photo.cols().max(photo.rows());
+    let scale = (f64::from(THUMBNAIL_MAX_EDGE) / f64::from(largest_edge)).min(1.0);
+    let mut thumbnail = Mat::default();
+    if scale < 1.0 {
+        imgproc::resize(
+            photo,
+            &mut thumbnail,
+            Size::new(
+                (f64::from(photo.cols()) * scale).round().max(1.0) as i32,
+                (f64::from(photo.rows()) * scale).round().max(1.0) as i32,
+            ),
+            0.0,
+            0.0,
+            imgproc::INTER_AREA,
+        )?;
+    } else {
+        thumbnail = photo.clone();
+    }
+    let parameters = Vector::from_slice(&[imgcodecs::IMWRITE_JPEG_QUALITY, 86]);
+    if !imgcodecs::imwrite(path, &thumbnail, &parameters)? {
+        bail!("Miniatur konnte nicht gespeichert werden");
+    }
+    Ok(())
+}
+
 fn request_devices(ui: &Ui) {
     if ui.busy.get() {
         return;
@@ -1308,11 +1662,12 @@ fn request_devices(ui: &Ui) {
 }
 
 fn handle_message(ui: &Ui, message: Message) {
-    let work_message = matches!(&message, Message::Work { .. });
+    let work_message = matches!(&message, Message::Work { .. } | Message::ReviewReady { .. });
     let message_operation_id = match &message {
         Message::Progress { operation_id, .. }
         | Message::Status { operation_id, .. }
         | Message::Devices { operation_id, .. }
+        | Message::ReviewReady { operation_id, .. }
         | Message::Work { operation_id, .. } => *operation_id,
     };
     if message_operation_id != ui.operation_id.get() {
@@ -1399,9 +1754,27 @@ fn handle_message(ui: &Ui, message: Message) {
                 ui.refresh_button.grab_focus();
             }
         }
+        Message::ReviewReady {
+            result: Ok(review), ..
+        } => {
+            let count = review.photos.len();
+            set_busy(ui, false, &format!("{count} Fotos erkannt – bitte prüfen"));
+            show_review(ui, review);
+        }
+        Message::ReviewReady {
+            result: Err(error), ..
+        } => {
+            if error.starts_with(CANCELLED_MESSAGE) {
+                set_busy(ui, false, "Vorgang abgebrochen");
+            } else {
+                set_busy(ui, false, "Prüfung konnte nicht vorbereitet werden");
+                show_error(ui, &error);
+            }
+        }
         Message::Work {
             result: Ok(result), ..
         } => {
+            drop_review(ui);
             ui.last_capture_date.set(Some(result.capture_date));
             save_settings(ui);
             set_busy(ui, false, &result.title);
@@ -1420,11 +1793,15 @@ fn handle_message(ui: &Ui, message: Message) {
             ]);
             *ui.preview_directory.borrow_mut() = Some(result.preview_directory);
             ui.preview_stack.set_visible_child_name("picture");
+            ui.window.set_default_widget(Some(&ui.scan_button));
             ui.toast_overlay.add_toast(adw::Toast::new(&result.title));
         }
         Message::Work {
             result: Err(error), ..
         } => {
+            drop_review(ui);
+            show_previous_preview(ui);
+            ui.window.set_default_widget(Some(&ui.scan_button));
             if error.starts_with(CANCELLED_MESSAGE) {
                 set_busy(ui, false, "Vorgang abgebrochen");
             } else {
@@ -1436,6 +1813,281 @@ fn handle_message(ui: &Ui, message: Message) {
     if work_message && ui.discovery_pending.get() {
         request_devices(ui);
     }
+}
+
+fn show_review(ui: &Ui, review: ReviewData) {
+    drop_review(ui);
+    ui.review_overview
+        .set_file(Some(&gio::File::for_path(&review.overview)));
+    let included_count = Rc::new(Cell::new(review.photos.len()));
+    ui.review_save_button
+        .set_label(&format!("{} Fotos speichern", review.photos.len()));
+    let mut selections = Vec::with_capacity(review.photos.len());
+    for (index, photo) in review.photos.iter().enumerate() {
+        let include = Rc::new(Cell::new(true));
+        let quarter_turns = Rc::new(Cell::new(0));
+        let card = build_review_card(
+            index,
+            photo,
+            &include,
+            &quarter_turns,
+            &included_count,
+            &ui.review_save_button,
+            &ui.save_review_action,
+        );
+        ui.review_flow.insert(&card, -1);
+        selections.push(ReviewSelection {
+            include,
+            quarter_turns,
+        });
+    }
+    *ui.review_state.borrow_mut() = Some(StoredReview {
+        data: review,
+        selections,
+    });
+    ui.save_review_action.set_enabled(true);
+    ui.discard_review_action.set_enabled(true);
+    set_zoom_actions_enabled(ui, false);
+    ui.preview_stack.set_visible_child_name("review");
+    ui.window.set_default_widget(Some(&ui.review_save_button));
+}
+
+fn build_review_card(
+    index: usize,
+    photo: &ReviewPhotoData,
+    include: &Rc<Cell<bool>>,
+    quarter_turns: &Rc<Cell<u8>>,
+    included_count: &Rc<Cell<usize>>,
+    save_button: &gtk::Button,
+    save_action: &gio::SimpleAction,
+) -> gtk::Box {
+    let picture = gtk::Picture::builder()
+        .file(&gio::File::for_path(&photo.thumbnail_path))
+        .content_fit(gtk::ContentFit::Contain)
+        .can_shrink(true)
+        .width_request(180)
+        .height_request(140)
+        .build();
+    let check = gtk::CheckButton::builder()
+        .label(format!("Foto {} speichern", index + 1))
+        .active(true)
+        .build();
+    let rotate = gtk::Button::builder()
+        .icon_name("object-rotate-right-symbolic")
+        .tooltip_text("90° nach rechts drehen")
+        .build();
+    rotate.add_css_class("flat");
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    controls.append(&check);
+    controls.append(&rotate);
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    card.set_margin_top(8);
+    card.set_margin_bottom(8);
+    card.set_margin_start(8);
+    card.set_margin_end(8);
+    card.add_css_class("card");
+    card.append(&picture);
+    card.append(&controls);
+
+    let include_state = Rc::clone(include);
+    let count = Rc::clone(included_count);
+    let save_button = save_button.clone();
+    let save_action = save_action.clone();
+    check.connect_toggled(move |check| {
+        let active = check.is_active();
+        if include_state.replace(active) != active {
+            let next = if active {
+                count.get().saturating_add(1)
+            } else {
+                count.get().saturating_sub(1)
+            };
+            count.set(next);
+            save_button.set_label(&format!("{next} Fotos speichern"));
+            save_action.set_enabled(next > 0);
+        }
+    });
+
+    if let Ok(original) = Pixbuf::from_file(&photo.thumbnail_path) {
+        let turns = Rc::clone(quarter_turns);
+        rotate.connect_clicked(move |_| {
+            let next = (turns.get() + 1) % 4;
+            turns.set(next);
+            let rotation = match next {
+                1 => PixbufRotation::Clockwise,
+                2 => PixbufRotation::Upsidedown,
+                3 => PixbufRotation::Counterclockwise,
+                _ => PixbufRotation::None,
+            };
+            if let Some(rotated) = original.rotate_simple(rotation)
+                && let Ok(encoded) = rotated.save_to_bufferv("png", &[])
+                && let Ok(texture) =
+                    gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(encoded))
+            {
+                picture.set_paintable(Some(&texture));
+            }
+        });
+    } else {
+        rotate.set_sensitive(false);
+    }
+    card
+}
+
+fn drop_review(ui: &Ui) -> bool {
+    let had_review = ui.review_state.borrow_mut().take().is_some();
+    while let Some(child) = ui.review_flow.first_child() {
+        let Ok(child) = child.downcast::<gtk::FlowBoxChild>() else {
+            break;
+        };
+        ui.review_flow.remove(&child);
+    }
+    ui.review_overview
+        .set_paintable(None::<&gtk::gdk::Paintable>);
+    ui.save_review_action.set_enabled(false);
+    ui.discard_review_action.set_enabled(false);
+    had_review
+}
+
+fn discard_review(ui: &Ui) {
+    if !drop_review(ui) {
+        return;
+    }
+    show_previous_preview(ui);
+    ui.window.set_default_widget(Some(&ui.scan_button));
+    set_status(
+        ui,
+        "Prüfung verworfen",
+        gtk::AccessibleAnnouncementPriority::Medium,
+    );
+}
+
+fn show_previous_preview(ui: &Ui) {
+    let has_preview = ui.picture.paintable().is_some();
+    ui.preview_stack
+        .set_visible_child_name(if has_preview { "picture" } else { "empty" });
+    set_zoom_actions_enabled(ui, has_preview);
+}
+
+fn save_review(ui: &Ui) {
+    if ui.busy.get() {
+        return;
+    }
+    let included = ui
+        .review_state
+        .borrow()
+        .as_ref()
+        .map(|review| {
+            review
+                .selections
+                .iter()
+                .filter(|selection| selection.include.get())
+                .count()
+        })
+        .unwrap_or(0);
+    if included == 0 {
+        show_error(ui, "Wähle mindestens ein Foto zum Speichern aus.");
+        return;
+    }
+    let Some(review) = ui.review_state.borrow_mut().take() else {
+        return;
+    };
+    let selections = review
+        .selections
+        .iter()
+        .map(|selection| (selection.include.get(), selection.quarter_turns.get()))
+        .collect::<Vec<_>>();
+    ui.save_review_action.set_enabled(false);
+    ui.discard_review_action.set_enabled(false);
+    let sender = ui.sender.clone();
+    let (operation_id, cancellation) = begin_operation(ui);
+    set_busy(ui, true, &format!("Speichere {included} Fotos …"));
+    thread::spawn(move || {
+        let result = run_worker(|| {
+            save_review_work(review.data, &selections, &cancellation).map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CANCELLED_MESSAGE.to_string()
+                } else {
+                    format!("{error:#}")
+                }
+            })
+        });
+        let _ = sender.send_blocking(Message::Work {
+            operation_id,
+            result,
+        });
+    });
+}
+
+fn save_review_work(
+    review: ReviewData,
+    selections: &[(bool, u8)],
+    cancellation: &ScannerCancellation,
+) -> Result<WorkResult> {
+    let mut file_count = 0usize;
+    let mut last_preview = None;
+    for (group_index, group) in review.groups.iter().enumerate() {
+        ensure_not_cancelled(cancellation)?;
+        let mut photos = Vec::new();
+        let mut regions = Vec::new();
+        for (index, photo) in review.photos.iter().enumerate() {
+            if photo.group_index != group_index || !selections[index].0 {
+                continue;
+            }
+            let mut image = imgcodecs::imread(&photo.full_path, imgcodecs::IMREAD_COLOR)?;
+            if image.empty() {
+                bail!(
+                    "Prüffoto enthält keine Bilddaten: {}",
+                    photo.full_path.display()
+                );
+            }
+            image = rotate_quarter_turns(&image, selections[index].1)?;
+            photos.push(image);
+            regions.push(photo.region.clone());
+        }
+        if photos.is_empty() {
+            continue;
+        }
+        let result = export_photos(
+            &photos,
+            &group.analyzed,
+            &review.output,
+            &review.config,
+            None,
+            Some(&regions),
+        )?;
+        file_count += result.files.len();
+        last_preview = result.preview.or_else(|| result.files.first().cloned());
+    }
+    ensure_not_cancelled(cancellation)?;
+    let preview_source =
+        last_preview.ok_or_else(|| anyhow!("Kein Foto zum Speichern ausgewählt"))?;
+    let (preview, preview_directory) = bounded_preview(&preview_source)?;
+    let mut detail = review.output.display().to_string();
+    if !review.failures.is_empty() {
+        detail.push_str("\nFehler:\n");
+        detail.push_str(&review.failures.join("\n"));
+    }
+    Ok(WorkResult {
+        title: format!("{file_count} Foto(s) gespeichert"),
+        detail,
+        preview,
+        preview_directory,
+        capture_date: review
+            .config
+            .capture_date
+            .unwrap_or_else(|| Local::now().date_naive()),
+    })
+}
+
+fn rotate_quarter_turns(image: &Mat, turns: u8) -> Result<Mat> {
+    let code = match turns % 4 {
+        0 => return Ok(image.clone()),
+        1 => core::ROTATE_90_CLOCKWISE,
+        2 => core::ROTATE_180,
+        _ => core::ROTATE_90_COUNTERCLOCKWISE,
+    };
+    let mut rotated = Mat::default();
+    core::rotate(image, &mut rotated, code)?;
+    Ok(rotated)
 }
 
 fn set_zoom_actions_enabled(ui: &Ui, enabled: bool) {
@@ -1520,6 +2172,7 @@ fn save_settings(ui: &Ui) {
         padding: ui.padding.value(),
         auto_threshold: ui.auto_threshold.is_active(),
         threshold: ui.threshold.value(),
+        review_before_save: ui.review_before_save.is_active(),
         capture_date: ui.last_capture_date.get(),
     };
     if let Err(error) = settings.save(&ui.settings_path) {
@@ -1719,5 +2372,18 @@ mod tests {
         let summary = error_summary(&long);
         assert_eq!(summary.chars().count(), 120);
         assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn quarter_turn_rotation_changes_dimensions() {
+        let image =
+            Mat::new_rows_cols_with_default(40, 90, CV_8UC3, Scalar::new(20.0, 80.0, 160.0, 0.0))
+                .unwrap();
+
+        let clockwise = rotate_quarter_turns(&image, 1).unwrap();
+        let upside_down = rotate_quarter_turns(&image, 2).unwrap();
+
+        assert_eq!((clockwise.cols(), clockwise.rows()), (40, 90));
+        assert_eq!((upside_down.cols(), upside_down.rows()), (90, 40));
     }
 }

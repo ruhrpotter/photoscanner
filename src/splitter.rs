@@ -389,10 +389,27 @@ pub struct DetectedPhoto {
 }
 
 #[derive(Clone, Debug)]
-struct PhotoRegion {
-    center: Point2f,
-    source_box: [Point2f; 4],
-    area_percent: f64,
+/// Geometrie eines auf der Scanfläche erkannten Fotos.
+pub struct DetectedRegion {
+    /// Mittelpunkt im Koordinatensystem des Quellbilds.
+    pub center: Point2f,
+    /// Vier geordnete Eckpunkte im Quellbild.
+    pub source_box: [Point2f; 4],
+    /// Flächenanteil an der gesamten Scanfläche in Prozent.
+    pub area_percent: f64,
+}
+
+#[derive(Debug)]
+/// Geladenes Quellbild mit Erkennungsgeometrie und Metadaten.
+pub struct AnalyzedScan {
+    /// Orientierungsbereinigtes Quellbild.
+    pub image: Mat,
+    /// Zeilenweise sortierte erkannte Fotoregionen.
+    pub regions: Vec<DetectedRegion>,
+    /// Tatsächlich verwendeter Erkennungsschwellwert.
+    pub threshold: f64,
+    /// Aus Container oder Metadaten gelesene Auflösung.
+    pub embedded_dpi: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -669,7 +686,7 @@ fn warp_photo(image: &Mat, source_box: [Point2f; 4]) -> Result<Mat, SplitError> 
 fn detect_photo_regions(
     image: &Mat,
     config: &SplitConfig,
-) -> Result<(Vec<PhotoRegion>, f64), SplitError> {
+) -> Result<(Vec<DetectedRegion>, f64), SplitError> {
     config.validate()?;
     let (detection_image, scale) = scaled_for_detection(image, config.max_detection_size)?;
     let (mask, threshold) = foreground_mask(&detection_image, config.threshold)?;
@@ -714,7 +731,7 @@ fn detect_photo_regions(
         });
         // Stable order makes previews and row sorting deterministic across OpenCV versions.
         source_box = order_box(source_box);
-        detected.push(PhotoRegion {
+        detected.push(DetectedRegion {
             center: Point2f::new(rectangle.center.x / scale, rectangle.center.y / scale),
             source_box,
             area_percent: area / scan_area * 100.0,
@@ -774,6 +791,30 @@ pub fn detect_photos(
         });
     }
     Ok((photos, threshold))
+}
+
+/// Lädt und analysiert eine Scandatei, ohne Ausgabedateien anzulegen.
+pub fn analyze_scan(source: &Path, config: &SplitConfig) -> Result<AnalyzedScan, SplitError> {
+    config.validate()?;
+    let (image, embedded_dpi) = read_image(source)?;
+    let (regions, threshold) = detect_photo_regions(&image, config)?;
+    if regions.is_empty() {
+        return Err(SplitError::NothingDetected);
+    }
+    Ok(AnalyzedScan {
+        image,
+        regions,
+        threshold,
+        embedded_dpi,
+    })
+}
+
+/// Schneidet eine erkannte Region perspektivisch korrigiert aus.
+pub fn warp_detected_photo(
+    analyzed: &AnalyzedScan,
+    region: &DetectedRegion,
+) -> Result<Mat, SplitError> {
+    warp_photo(&analyzed.image, region.source_box)
 }
 
 struct StagedOutput {
@@ -1016,7 +1057,7 @@ fn stage_image(
 
 fn save_preview(
     image: &Mat,
-    photos: &[PhotoRegion],
+    photos: &[DetectedRegion],
     path: &Path,
     captured_at: DateTime<Local>,
 ) -> Result<(), SplitError> {
@@ -1066,7 +1107,7 @@ fn save_preview(
 
 fn stage_preview(
     image: &Mat,
-    photos: &[PhotoRegion],
+    photos: &[DetectedRegion],
     directory: &Path,
     captured_at: DateTime<Local>,
 ) -> Result<TempPath, SplitError> {
@@ -1074,6 +1115,21 @@ fn stage_preview(
     save_preview(image, photos, temporary.path(), captured_at)?;
     File::open(temporary.path())?.sync_all()?;
     Ok(temporary.into_temp_path())
+}
+
+/// Schreibt eine begrenzte Kontrollvorschau für ausgewählte Regionen.
+pub fn save_detection_preview(
+    analyzed: &AnalyzedScan,
+    regions: &[DetectedRegion],
+    path: &Path,
+    capture_date: Option<NaiveDate>,
+) -> Result<(), SplitError> {
+    save_preview(
+        &analyzed.image,
+        regions,
+        path,
+        capture_datetime(capture_date)?,
+    )
 }
 
 /// Speichert die gesamte Scanfläche als eine neue, kollisionsfreie Datei.
@@ -1126,60 +1182,87 @@ pub fn split_scan(
     prefix: Option<&str>,
     create_preview: bool,
 ) -> Result<SplitResult, SplitError> {
+    let analyzed = analyze_scan(source, config)?;
+    let mut photos = Vec::with_capacity(analyzed.regions.len());
+    let mut exported_regions = Vec::with_capacity(analyzed.regions.len());
+    for region in &analyzed.regions {
+        let photo = warp_detected_photo(&analyzed, region)?;
+        if photo.rows().min(photo.cols()) < 10 {
+            continue;
+        }
+        photos.push(photo);
+        exported_regions.push(region.clone());
+    }
+    export_photos(
+        &photos,
+        &analyzed,
+        output_directory,
+        config,
+        prefix,
+        create_preview.then_some(exported_regions.as_slice()),
+    )
+}
+
+/// Veröffentlicht vorbereitete Fotos gemeinsam und kollisionsfrei.
+///
+/// Wenn `preview_regions` gesetzt ist, muss es genau eine Region pro Foto
+/// enthalten. Die Vorschau markiert und nummeriert nur diese Regionen.
+pub fn export_photos(
+    photos: &[Mat],
+    analyzed: &AnalyzedScan,
+    output_directory: &Path,
+    config: &SplitConfig,
+    prefix: Option<&str>,
+    preview_regions: Option<&[DetectedRegion]>,
+) -> Result<SplitResult, SplitError> {
     config.validate()?;
     if let Some(prefix) = prefix {
         validate_prefix(prefix)?;
     }
-    let (image, embedded_dpi) = read_image(source)?;
-    let (regions, threshold) = detect_photo_regions(&image, config)?;
-    if regions.is_empty() {
+    if photos.is_empty() {
         return Err(SplitError::NothingDetected);
+    }
+    if preview_regions.is_some_and(|regions| regions.len() != photos.len()) {
+        return Err(SplitError::InvalidConfig(
+            "Für jedes exportierte Foto muss genau eine Vorschauregion angegeben werden."
+                .to_string(),
+        ));
     }
     fs::create_dir_all(output_directory)?;
     let captured_at = capture_datetime(config.capture_date)?;
     let base = prefix
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("scan_{}", captured_at.format("%Y%m%d_%H%M%S")));
-    let dpi = config.dpi.or(embedded_dpi);
-    let mut staged = Vec::with_capacity(regions.len() + usize::from(create_preview));
-    let mut exported_regions = Vec::with_capacity(regions.len());
-    for region in regions {
-        let photo = warp_photo(&image, region.source_box)?;
-        if photo.rows().min(photo.cols()) < 10 {
-            continue;
-        }
+    let dpi = config.dpi.or(analyzed.embedded_dpi);
+    let mut staged = Vec::with_capacity(photos.len() + usize::from(preview_regions.is_some()));
+    for (index, photo) in photos.iter().enumerate() {
         let temporary = stage_image(
-            &photo,
+            photo,
             output_directory,
             config.output_format,
             config.jpeg_quality,
             dpi,
             captured_at,
         )?;
-        let index = staged.len() + 1;
         staged.push(StagedOutput {
             temporary,
-            stem: format!("{base}_{index:02}"),
+            stem: format!("{base}_{:02}", index + 1),
             extension: config.output_format.extension(),
         });
-        exported_regions.push(region);
     }
-    if staged.is_empty() {
-        return Err(SplitError::NothingDetected);
-    }
-    if create_preview {
+    if let Some(regions) = preview_regions {
         staged.push(StagedOutput {
-            temporary: stage_preview(&image, &exported_regions, output_directory, captured_at)?,
+            temporary: stage_preview(&analyzed.image, regions, output_directory, captured_at)?,
             stem: format!("{base}_vorschau"),
             extension: "jpg",
         });
     }
     let mut published = publish_staged_group(output_directory, staged)?;
-    let preview = create_preview.then(|| published.pop().expect("bereitgestellte Vorschau"));
+    let preview = preview_regions.map(|_| published.pop().expect("bereitgestellte Vorschau"));
     Ok(SplitResult {
         files: published,
         preview,
-        threshold_used: threshold,
+        threshold_used: analyzed.threshold,
     })
 }
 
@@ -1324,6 +1407,92 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn export_photos_preserves_supplied_rotation() {
+        let root = TempDir::new().unwrap();
+        let source = root.path().join("scan.png");
+        imgcodecs::imwrite_def(&source, &synthetic_scan()).unwrap();
+        let analyzed = analyze_scan(&source, &SplitConfig::default()).unwrap();
+        let original = Mat::new_rows_cols_with_default(
+            40,
+            90,
+            core::CV_8UC3,
+            Scalar::new(20.0, 80.0, 160.0, 0.0),
+        )
+        .unwrap();
+        let mut rotated = Mat::default();
+        core::rotate(&original, &mut rotated, core::ROTATE_90_CLOCKWISE).unwrap();
+        let config = SplitConfig {
+            output_format: OutputFormat::Png,
+            capture_date: NaiveDate::from_ymd_opt(1995, 9, 1),
+            ..SplitConfig::default()
+        };
+
+        let result = export_photos(
+            &[rotated],
+            &analyzed,
+            &root.path().join("rotated"),
+            &config,
+            Some("rotation"),
+            None,
+        )
+        .unwrap();
+        let exported = imgcodecs::imread(&result.files[0], imgcodecs::IMREAD_COLOR).unwrap();
+
+        assert_eq!((exported.cols(), exported.rows()), (40, 90));
+    }
+
+    #[test]
+    fn subset_export_is_contiguous_and_previews_only_included_regions() {
+        let root = TempDir::new().unwrap();
+        let source = root.path().join("scan.png");
+        imgcodecs::imwrite_def(&source, &synthetic_scan()).unwrap();
+        let config = SplitConfig {
+            output_format: OutputFormat::Png,
+            capture_date: NaiveDate::from_ymd_opt(1995, 9, 1),
+            ..SplitConfig::default()
+        };
+        let analyzed = analyze_scan(&source, &config).unwrap();
+        let regions = vec![analyzed.regions[0].clone(), analyzed.regions[2].clone()];
+        let photos = regions
+            .iter()
+            .map(|region| warp_detected_photo(&analyzed, region).unwrap())
+            .collect::<Vec<_>>();
+        let output = root.path().join("subset");
+
+        let result = export_photos(
+            &photos,
+            &analyzed,
+            &output,
+            &config,
+            Some("auswahl"),
+            Some(&regions),
+        )
+        .unwrap();
+
+        assert_eq!(result.files.len(), 2);
+        assert_eq!(
+            result.files[0].file_name().unwrap().to_string_lossy(),
+            "auswahl_01.png"
+        );
+        assert_eq!(
+            result.files[1].file_name().unwrap().to_string_lossy(),
+            "auswahl_02.png"
+        );
+        let expected_path = root.path().join("expected.jpg");
+        save_preview(
+            &analyzed.image,
+            &regions,
+            &expected_path,
+            capture_datetime(config.capture_date).unwrap(),
+        )
+        .unwrap();
+        let actual =
+            imgcodecs::imread(result.preview.as_ref().unwrap(), imgcodecs::IMREAD_COLOR).unwrap();
+        let expected = imgcodecs::imread(&expected_path, imgcodecs::IMREAD_COLOR).unwrap();
+        assert_eq!(actual.data_bytes().unwrap(), expected.data_bytes().unwrap());
     }
 
     #[test]
