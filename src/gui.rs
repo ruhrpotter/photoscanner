@@ -75,6 +75,8 @@ struct Ui {
     review_flow: gtk::FlowBox,
     review_save_button: gtk::Button,
     zoom: Rc<Cell<f64>>,
+    review_zoom: Cell<f64>,
+    review_images: RefCell<Vec<ReviewImage>>,
     devices: Rc<RefCell<Vec<ScannerDevice>>>,
     output_directory: Rc<RefCell<PathBuf>>,
     busy: Rc<Cell<bool>>,
@@ -328,6 +330,12 @@ fn load_custom_theme(provider: &gtk::CssProvider, path: &Path) -> Result<()> {
 }
 
 fn build_window(application: &adw::Application) {
+    let ui = build_ui(application);
+    request_devices(&ui);
+    ui.window.present();
+}
+
+fn build_ui(application: &adw::Application) -> Rc<Ui> {
     let (sender, receiver) = async_channel::bounded(8);
     let settings_path = config_directory().join("settings.ini");
     let persisted_settings = PersistedSettings::load(&settings_path);
@@ -594,6 +602,8 @@ fn build_window(application: &adw::Application) {
         review_flow,
         review_save_button,
         zoom,
+        review_zoom: Cell::new(1.0),
+        review_images: RefCell::new(Vec::new()),
         devices,
         output_directory,
         busy,
@@ -661,10 +671,9 @@ fn build_window(application: &adw::Application) {
         glib::Propagation::Proceed
     });
 
-    request_devices(&ui);
     update_control_states(&ui);
     ui.window.set_default_widget(Some(&ui.scan_button));
-    window.present();
+    ui
 }
 
 fn short_path(path: &Path) -> String {
@@ -1191,7 +1200,11 @@ fn connect_actions(ui: &Rc<Ui>) {
     let weak_ui = Rc::downgrade(ui);
     ui.zoom_fit_action.connect_activate(move |_, _| {
         if let Some(ui) = weak_ui.upgrade() {
-            set_preview_zoom(&ui, 0.0);
+            if ui.preview_stack.visible_child_name().as_deref() == Some("review") {
+                set_review_zoom(&ui, 1.0);
+            } else {
+                set_preview_zoom(&ui, 0.0);
+            }
         }
     });
 
@@ -1209,6 +1222,7 @@ fn connect_actions(ui: &Rc<Ui>) {
     });
 
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
     let weak_ui = Rc::downgrade(ui);
     scroll.connect_scroll(move |controller, _, dy| {
         if !controller
@@ -1222,7 +1236,7 @@ fn connect_actions(ui: &Rc<Ui>) {
         }
         glib::Propagation::Stop
     });
-    ui.preview_scroller.add_controller(scroll);
+    ui.preview_stack.add_controller(scroll);
 
     ui.window.add_action(&ui.scan_action);
     ui.window.add_action(&ui.import_action);
@@ -2178,7 +2192,7 @@ fn show_review(ui: &Ui, review: ReviewData) {
     for (index, photo) in review.photos.iter().enumerate() {
         let include = Rc::new(Cell::new(true));
         let quarter_turns = Rc::new(Cell::new(0));
-        let card = build_review_card(
+        let (card, image) = build_review_card(
             index,
             photo,
             &include,
@@ -2192,6 +2206,7 @@ fn show_review(ui: &Ui, review: ReviewData) {
             },
         );
         ui.review_flow.insert(&card, -1);
+        ui.review_images.borrow_mut().push(image);
         selections.push(ReviewSelection {
             include,
             quarter_turns,
@@ -2203,10 +2218,29 @@ fn show_review(ui: &Ui, review: ReviewData) {
     });
     ui.save_review_action.set_enabled(true);
     ui.discard_review_action.set_enabled(true);
-    set_zoom_actions_enabled(ui, false);
     ui.preview_stack.set_visible_child_name("review");
+    set_review_zoom(ui, 1.0);
     ui.scan_button.remove_css_class("suggested-action");
     ui.window.set_default_widget(Some(&ui.review_save_button));
+}
+
+struct ReviewImage {
+    frame: gtk::Box,
+    width: adw::Clamp,
+    height: adw::Clamp,
+}
+
+impl ReviewImage {
+    fn set_zoom(&self, zoom: f64) {
+        let width = (224.0 * zoom).round() as i32;
+        let height = (176.0 * zoom).round() as i32;
+        self.frame
+            .set_size_request((184.0 * zoom).round() as i32, height);
+        self.width.set_maximum_size(width);
+        self.width.set_tightening_threshold(width);
+        self.height.set_maximum_size(height);
+        self.height.set_tightening_threshold(height);
+    }
 }
 
 struct ReviewCardControls<'a> {
@@ -2223,7 +2257,7 @@ fn build_review_card(
     include: &Rc<Cell<bool>>,
     quarter_turns: &Rc<Cell<u8>>,
     context: ReviewCardControls<'_>,
-) -> gtk::Box {
+) -> (gtk::Box, ReviewImage) {
     let picture = gtk::Picture::builder()
         .file(&gio::File::for_path(&photo.thumbnail_path))
         .content_fit(gtk::ContentFit::Contain)
@@ -2337,7 +2371,14 @@ fn build_review_card(
     } else {
         rotate.set_sensitive(false);
     }
-    card
+    (
+        card,
+        ReviewImage {
+            frame: picture_frame,
+            width: picture_size,
+            height: picture_height,
+        },
+    )
 }
 
 fn update_review_selection_label(label: &gtk::Label, selected: usize, total: usize) {
@@ -2353,6 +2394,7 @@ fn update_review_selection_label(label: &gtk::Label, selected: usize, total: usi
 }
 
 fn drop_review(ui: &Ui) -> bool {
+    ui.review_images.borrow_mut().clear();
     ui.scan_button.add_css_class("suggested-action");
     let had_review = ui.review_state.borrow_mut().take().is_some();
     while let Some(child) = ui.review_flow.first_child() {
@@ -2525,17 +2567,51 @@ fn set_zoom_actions_enabled(ui: &Ui, enabled: bool) {
     ui.zoom_fit_action.set_enabled(enabled);
 }
 
+fn set_review_zoom(ui: &Ui, zoom: f64) {
+    let zoom = zoom.clamp(0.5, 2.0);
+    ui.review_zoom.set(zoom);
+    for image in ui.review_images.borrow().iter() {
+        image.set_zoom(zoom);
+    }
+    ui.zoom_in_action.set_enabled(zoom < 2.0);
+    ui.zoom_out_action.set_enabled(zoom > 0.5);
+    ui.zoom_fit_action.set_enabled(true);
+}
+
 fn zoom_preview(ui: &Ui, factor: f64) {
-    if ui.picture.paintable().is_none() {
+    if ui.preview_stack.visible_child_name().as_deref() == Some("review") {
+        set_review_zoom(ui, ui.review_zoom.get() * factor);
         return;
     }
-    let current = ui.zoom.get();
-    let base = if current == 0.0 { 1.0 } else { current };
-    set_preview_zoom(ui, (base * factor).clamp(0.25, 4.0));
+    let Some(paintable) = ui.picture.paintable() else {
+        return;
+    };
+    set_preview_zoom(
+        ui,
+        next_picture_zoom(
+            ui.zoom.get(),
+            factor,
+            (paintable.intrinsic_width(), paintable.intrinsic_height()),
+            (ui.picture.width(), ui.picture.height()),
+        ),
+    );
+}
+
+fn next_picture_zoom(current: f64, factor: f64, image: (i32, i32), viewport: (i32, i32)) -> f64 {
+    let base = if current > 0.0 {
+        current
+    } else if image.0 > 0 && image.1 > 0 && viewport.0 > 0 && viewport.1 > 0 {
+        (f64::from(viewport.0) / f64::from(image.0)).min(f64::from(viewport.1) / f64::from(image.1))
+    } else {
+        1.0
+    };
+    (base * factor).clamp(0.02, 4.0)
 }
 
 fn set_preview_zoom(ui: &Ui, zoom: f64) {
     ui.zoom.set(zoom);
+    ui.zoom_in_action.set_enabled(zoom < 4.0);
+    ui.zoom_out_action.set_enabled(zoom == 0.0 || zoom > 0.02);
     if zoom == 0.0 {
         ui.picture.set_size_request(-1, -1);
         ui.picture.set_content_fit(gtk::ContentFit::Contain);
@@ -2563,8 +2639,9 @@ fn set_preview_zoom(ui: &Ui, zoom: f64) {
     ui.picture.set_vexpand(false);
     ui.picture.set_halign(gtk::Align::Center);
     ui.picture.set_valign(gtk::Align::Center);
-    ui.picture.set_can_shrink(false);
-    ui.picture.set_content_fit(gtk::ContentFit::Fill);
+    // The explicit request defines the zoom size, including sizes below 100%.
+    ui.picture.set_can_shrink(true);
+    ui.picture.set_content_fit(gtk::ContentFit::Contain);
     ui.picture.set_size_request(
         (f64::from(width) * zoom).round().max(1.0) as i32,
         (f64::from(height) * zoom).round().max(1.0) as i32,
@@ -2790,6 +2867,93 @@ fn bounded_preview(source: &Path) -> Result<(PathBuf, TempDir)> {
 mod tests {
     use super::*;
     use opencv::core::{CV_8UC3, Scalar};
+
+    #[test]
+    #[ignore = "requires a GTK display; run with --ignored --test-threads=1"]
+    fn zoom_buttons_resize_the_visible_review_and_preview() {
+        adw::init().unwrap();
+        install_theme();
+        let application = adw::Application::builder()
+            .application_id("de.martin.PhotoScanner.ZoomTest")
+            .flags(gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        application.register(None::<&gio::Cancellable>).unwrap();
+        let ui = build_ui(&application);
+        gtk::prelude::WidgetExt::realize(&ui.window);
+        let directory = TempDir::new().unwrap();
+        let source_path = directory.path().join("scan.png");
+        let mut source =
+            Mat::new_rows_cols_with_default(800, 1200, CV_8UC3, Scalar::all(255.0)).unwrap();
+        imgproc::rectangle(
+            &mut source,
+            core::Rect::new(100, 100, 600, 450),
+            Scalar::new(40.0, 80.0, 140.0, 0.0),
+            -1,
+            imgproc::LINE_8,
+            0,
+        )
+        .unwrap();
+        assert!(imgcodecs::imwrite_def(&source_path, &source).unwrap());
+        let review = prepare_review(
+            std::slice::from_ref(&source_path),
+            directory.path(),
+            &SplitConfig::default(),
+            &ScannerCancellation::new(),
+            None,
+        )
+        .unwrap();
+        show_review(&ui, review);
+        assert!(ui.zoom_in_action.is_enabled(), "review must support zoom");
+        let card = ui.review_flow.first_child().unwrap();
+        let original = card.measure(gtk::Orientation::Vertical, -1).0;
+        ui.zoom_in_action.activate(None);
+        assert!(card.measure(gtk::Orientation::Vertical, -1).0 > original);
+        ui.zoom_out_action.activate(None);
+        assert_eq!(card.measure(gtk::Orientation::Vertical, -1).0, original);
+        ui.zoom_in_action.activate(None);
+        ui.zoom_fit_action.activate(None);
+        assert_eq!(card.measure(gtk::Orientation::Vertical, -1).0, original);
+        for _ in 0..12 {
+            ui.zoom_in_action.activate(None);
+        }
+        assert!(!ui.zoom_in_action.is_enabled());
+        for _ in 0..20 {
+            ui.zoom_out_action.activate(None);
+        }
+        assert!(!ui.zoom_out_action.is_enabled());
+        ui.zoom_fit_action.activate(None);
+        assert_eq!(card.measure(gtk::Orientation::Vertical, -1).0, original);
+        assert_eq!(
+            ui.review_state.borrow().as_ref().unwrap().selections.len(),
+            1
+        );
+
+        drop_review(&ui);
+        ui.picture
+            .set_file(Some(&gio::File::for_path(&source_path)));
+        show_previous_preview(&ui);
+        set_preview_zoom(&ui, 0.5);
+        assert_eq!(ui.picture.measure(gtk::Orientation::Horizontal, -1).0, 600);
+        assert_eq!(ui.picture.measure(gtk::Orientation::Vertical, -1).0, 400);
+        ui.zoom_out_action.activate(None);
+        assert_eq!(ui.picture.measure(gtk::Orientation::Horizontal, -1).0, 480);
+        ui.zoom_in_action.activate(None);
+        assert_eq!(ui.picture.measure(gtk::Orientation::Horizontal, -1).0, 600);
+        ui.zoom_fit_action.activate(None);
+        assert_eq!(ui.picture.width_request(), -1);
+        assert_eq!(ui.picture.height_request(), -1);
+        ui.sender.close();
+        ui.window.destroy();
+    }
+
+    #[test]
+    fn picture_zoom_starts_from_the_fitted_size() {
+        let image = (3200, 2400);
+        let viewport = (640, 480);
+        assert!((next_picture_zoom(0.0, 1.25, image, viewport) - 0.25).abs() < 1e-9);
+        assert!((next_picture_zoom(0.0, 0.8, image, viewport) - 0.16).abs() < 1e-9);
+        assert!((next_picture_zoom(0.5, 1.25, image, viewport) - 0.625).abs() < 1e-9);
+    }
 
     #[test]
     fn bounded_preview_limits_the_largest_edge() {
