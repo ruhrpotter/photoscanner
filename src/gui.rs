@@ -355,8 +355,8 @@ fn build_window(application: &adw::Application) {
 
     let split_view = adw::OverlaySplitView::builder()
         .min_sidebar_width(340.0)
-        .max_sidebar_width(420.0)
-        .sidebar_width_fraction(0.32)
+        .max_sidebar_width(380.0)
+        .sidebar_width_fraction(0.29)
         .enable_hide_gesture(true)
         .enable_show_gesture(true)
         .build();
@@ -374,6 +374,12 @@ fn build_window(application: &adw::Application) {
     ]);
     let mode_dropdown = adw::ComboRow::builder()
         .title(tr("Processing"))
+        .use_subtitle(true)
+        .expression(gtk::PropertyExpression::new(
+            gtk::StringObject::static_type(),
+            None::<gtk::Expression>,
+            "string",
+        ))
         .model(&mode_model)
         .selected(persisted_settings.mode_index)
         .build();
@@ -444,6 +450,10 @@ fn build_window(application: &adw::Application) {
         .tooltip_text(output_directory.borrow().display().to_string())
         .valign(gtk::Align::Center)
         .build();
+    if let Some(label) = output_button.child().and_downcast::<gtk::Label>() {
+        label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        label.set_max_width_chars(16);
+    }
     let refresh_button = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .tooltip_text(tr("Search for scanners again"))
@@ -477,7 +487,7 @@ fn build_window(application: &adw::Application) {
         .child(&import_button_content)
         .hexpand(true)
         .build();
-    import_button.add_css_class("primary-action");
+    import_button.add_css_class("secondary-action");
     let cancel_button_content = adw::ButtonContent::builder()
         .label(tr("Cancel"))
         .icon_name("process-stop-symbolic")
@@ -488,7 +498,7 @@ fn build_window(application: &adw::Application) {
         .hexpand(true)
         .visible(false)
         .build();
-    cancel_button.add_css_class("destructive-action");
+    cancel_button.add_css_class("secondary-action");
     cancel_button.update_property(&[
         gtk::accessible::Property::Label(&tr("Cancel")),
         gtk::accessible::Property::KeyShortcuts("Escape"),
@@ -510,15 +520,20 @@ fn build_window(application: &adw::Application) {
     output_button.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+L")]);
 
     let spinner = gtk::Spinner::new();
+    spinner
+        .bind_property("spinning", &spinner, "visible")
+        .sync_create()
+        .build();
     let progress_bar = gtk::ProgressBar::builder()
         .visible(false)
-        .width_request(160)
+        .width_request(120)
         .valign(gtk::Align::Center)
         .build();
     let status_label = gtk::Label::builder()
         .label(tr("Ready to scan"))
         .xalign(0.0)
-        .wrap(true)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .max_width_chars(48)
         .hexpand(true)
         .build();
     status_label.set_accessible_role(gtk::AccessibleRole::Status);
@@ -662,6 +677,7 @@ fn short_path(path: &Path) -> String {
 
 fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     let toolbar = adw::ToolbarView::new();
+    toolbar.add_css_class("scanner-sidebar");
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(
         APP_NAME,
@@ -669,22 +685,15 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     )));
     toolbar.add_top_bar(&header);
 
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.add_css_class("scanner-sidebar");
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 24);
+    content.set_margin_top(12);
+    content.set_margin_bottom(24);
+    content.set_margin_start(18);
+    content.set_margin_end(18);
 
     let scanner_group = adw::PreferencesGroup::builder().title(tr("Scan")).build();
+    scanner_group.set_header_suffix(Some(&ui.refresh_button));
     scanner_group.add(&ui.device_dropdown);
-    let refresh_row = adw::ActionRow::builder()
-        .title(tr("Refresh devices"))
-        .subtitle(tr("Query SANE and AirScan again"))
-        .build();
-    refresh_row.add_suffix(&ui.refresh_button);
-    refresh_row.set_activatable_widget(Some(&ui.refresh_button));
-    scanner_group.add(&refresh_row);
     scanner_group.add(&ui.mode_dropdown);
     let review_row = adw::ActionRow::builder()
         .title(tr("Review before saving"))
@@ -713,11 +722,13 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
     ));
     content.append(&export_group);
 
-    let detection_group = adw::PreferencesGroup::builder()
+    let detection_group = adw::PreferencesGroup::new();
+    let detection = adw::ExpanderRow::builder()
         .title(tr("Detection"))
-        .description(tr(
+        .subtitle(tr(
             "Automatic detection is optimized for light scanner beds.",
         ))
+        .subtitle_lines(2)
         .build();
     let auto_row = adw::ActionRow::builder()
         .title(tr("Automatic threshold"))
@@ -725,22 +736,23 @@ fn build_sidebar(ui: &Ui) -> adw::ToolbarView {
         .build();
     auto_row.add_suffix(&ui.auto_threshold);
     auto_row.set_activatable_widget(Some(&ui.auto_threshold));
-    detection_group.add(&auto_row);
-    detection_group.add(&row_with_suffix(
+    detection.add_row(&auto_row);
+    detection.add_row(&row_with_suffix(
         &tr("Manual threshold"),
         None,
         &ui.threshold,
     ));
-    detection_group.add(&row_with_suffix(
+    detection.add_row(&row_with_suffix(
         &tr("Minimum area (%)"),
         Some(&tr("Ignore small dust and edge areas")),
         &ui.min_area,
     ));
-    detection_group.add(&row_with_suffix(
+    detection.add_row(&row_with_suffix(
         &tr("Additional margin (%)"),
         Some(&tr("Keep some space around each photo")),
         &ui.padding,
     ));
+    detection_group.add(&detection);
     content.append(&detection_group);
 
     let scroll = gtk::ScrolledWindow::builder()
@@ -765,8 +777,8 @@ fn build_action_bar(ui: &Ui) -> adw::WrapBox {
     actions.set_homogeneous(true);
     actions.set_halign(gtk::Align::End);
     actions.add_css_class("action-bar-actions");
-    actions.append(&ui.scan_button);
     actions.append(&ui.import_button);
+    actions.append(&ui.scan_button);
     actions.append(&ui.cancel_button);
 
     let bar = adw::WrapBox::builder()
@@ -835,16 +847,16 @@ fn build_preview() -> (
     let overview_frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     overview_frame.set_overflow(gtk::Overflow::Hidden);
     overview_frame.add_css_class("review-overview-frame");
+    overview_frame.set_valign(gtk::Align::Center);
     let overview_height = adw::Clamp::builder()
         .orientation(gtk::Orientation::Vertical)
-        .maximum_size(130)
-        .tightening_threshold(130)
+        .maximum_size(104)
+        .tightening_threshold(104)
         .child(&review_overview)
         .build();
     let overview_size = adw::Clamp::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .maximum_size(150)
-        .tightening_threshold(150)
+        .maximum_size(128)
+        .tightening_threshold(128)
         .child(&overview_height)
         .build();
     overview_frame.append(&overview_size);
@@ -872,13 +884,7 @@ fn build_preview() -> (
     overview_copy.append(&review_detected_label);
     overview_copy.append(&overview_description);
 
-    let overview_card = adw::WrapBox::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .child_spacing(20)
-        .line_spacing(16)
-        .natural_line_length(650)
-        .wrap_policy(adw::WrapPolicy::Natural)
-        .build();
+    let overview_card = gtk::Box::new(gtk::Orientation::Horizontal, 20);
     overview_card.set_margin_top(4);
     overview_card.set_margin_bottom(4);
     overview_card.set_margin_start(4);
@@ -889,27 +895,30 @@ fn build_preview() -> (
 
     let review_flow = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
-        .row_spacing(12)
-        .column_spacing(12)
+        .row_spacing(16)
+        .column_spacing(16)
         .max_children_per_line(4)
         .min_children_per_line(1)
         .homogeneous(true)
-        .halign(gtk::Align::Center)
+        .hexpand(true)
+        .halign(gtk::Align::Fill)
         .valign(gtk::Align::Start)
         .build();
+    review_flow.add_css_class("review-gallery");
     let review_title = gtk::Label::builder()
         .label(tr("Review detected photos"))
         .xalign(0.0)
+        .wrap(true)
         .hexpand(true)
         .build();
-    review_title.add_css_class("title-2");
+    review_title.add_css_class("title-1");
     let review_subtitle = gtk::Label::builder()
         .label(tr("Review the selection and orientation before export."))
         .xalign(0.0)
         .wrap(true)
         .build();
     review_subtitle.add_css_class("dim-label");
-    let review_heading = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let review_heading = gtk::Box::new(gtk::Orientation::Vertical, 6);
     review_heading.set_hexpand(true);
     review_heading.append(&review_title);
     review_heading.append(&review_subtitle);
@@ -944,10 +953,12 @@ fn build_preview() -> (
         .hexpand(true)
         .build();
     gallery_title.add_css_class("title-3");
-    let review_selection_label = gtk::Label::builder().xalign(1.0).build();
+    let review_selection_label = gtk::Label::builder().xalign(1.0).wrap(true).build();
     review_selection_label.add_css_class("review-selection-counter");
     review_selection_label.set_accessible_role(gtk::AccessibleRole::Status);
     let gallery_heading = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    gallery_heading.set_margin_start(4);
+    gallery_heading.set_margin_end(4);
     gallery_heading.append(&gallery_title);
     gallery_heading.append(&review_selection_label);
 
@@ -957,29 +968,38 @@ fn build_preview() -> (
     review_content.append(&gallery_heading);
     review_content.append(&review_flow);
     let review_clamp = adw::Clamp::builder()
-        .maximum_size(920)
-        .tightening_threshold(720)
+        .maximum_size(1120)
+        .tightening_threshold(960)
         .child(&review_content)
         .build();
     let review_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     review_page.add_css_class("review-page");
     review_page.append(&review_header);
     review_page.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    review_page.append(&review_clamp);
+    let review_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .child(&review_clamp)
+        .build();
+    review_page.append(&review_scroll);
 
     let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    empty.set_margin_start(24);
+    empty.set_margin_end(24);
     empty.set_halign(gtk::Align::Center);
     empty.set_valign(gtk::Align::Center);
     let icon = gtk::Image::from_icon_name("scanner-symbolic");
-    icon.set_pixel_size(72);
+    icon.set_pixel_size(48);
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);
     icon.add_css_class("empty-preview-icon");
     let title = gtk::Label::builder().label(tr("No preview yet")).build();
-    title.add_css_class("title-2");
+    title.add_css_class("title-1");
     let description = gtk::Label::builder()
         .label(tr("Start a scan or open an existing scan file."))
         .wrap(true)
         .justify(gtk::Justification::Center)
+        .max_width_chars(38)
         .build();
     description.add_css_class("dim-label");
     empty.append(&icon);
@@ -1021,6 +1041,7 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
         .action_name("win.toggle-sidebar")
         .build();
     sidebar_button.add_css_class("icon-action");
+    sidebar_button.add_css_class("flat");
     sidebar_button.update_property(&[
         gtk::accessible::Property::Label(&tr("Show or hide settings")),
         gtk::accessible::Property::Description(&tr(
@@ -1029,13 +1050,15 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
         gtk::accessible::Property::KeyShortcuts("F10"),
     ]);
     header.pack_start(&sidebar_button);
+    let zoom_controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    zoom_controls.add_css_class("zoom-controls");
     for (icon, tooltip, action) in [
+        ("zoom-out-symbolic", tr("Zoom out"), "win.zoom-out"),
         (
             "zoom-fit-best-symbolic",
             tr("Fit to window"),
             "win.zoom-fit",
         ),
-        ("zoom-out-symbolic", tr("Zoom out"), "win.zoom-out"),
         ("zoom-in-symbolic", tr("Zoom in"), "win.zoom-in"),
     ] {
         let button = gtk::Button::builder()
@@ -1044,15 +1067,18 @@ fn build_preview_pane(ui: &Ui) -> adw::ToolbarView {
             .action_name(action)
             .build();
         button.add_css_class("icon-action");
-        header.pack_end(&button);
+        button.add_css_class("flat");
+        zoom_controls.append(&button);
     }
+    header.pack_end(&zoom_controls);
     toolbar.add_top_bar(&header);
 
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    frame.set_margin_top(24);
-    frame.set_margin_bottom(24);
-    frame.set_margin_start(24);
-    frame.set_margin_end(24);
+    frame.set_margin_top(12);
+    frame.set_margin_bottom(16);
+    frame.set_margin_start(16);
+    frame.set_margin_end(16);
+    frame.set_overflow(gtk::Overflow::Hidden);
     frame.add_css_class("preview-card");
     frame.append(&ui.preview_stack);
 
@@ -2179,6 +2205,7 @@ fn show_review(ui: &Ui, review: ReviewData) {
     ui.discard_review_action.set_enabled(true);
     set_zoom_actions_enabled(ui, false);
     ui.preview_stack.set_visible_child_name("review");
+    ui.scan_button.remove_css_class("suggested-action");
     ui.window.set_default_widget(Some(&ui.review_save_button));
 }
 
@@ -2196,7 +2223,7 @@ fn build_review_card(
     include: &Rc<Cell<bool>>,
     quarter_turns: &Rc<Cell<u8>>,
     context: ReviewCardControls<'_>,
-) -> adw::Clamp {
+) -> gtk::Box {
     let picture = gtk::Picture::builder()
         .file(&gio::File::for_path(&photo.thumbnail_path))
         .content_fit(gtk::ContentFit::Contain)
@@ -2208,16 +2235,17 @@ fn build_review_card(
     let picture_frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     picture_frame.set_overflow(gtk::Overflow::Hidden);
     picture_frame.add_css_class("review-photo-frame");
+    // A stable proofing area keeps portrait and landscape photos equally readable.
+    picture_frame.set_size_request(184, 176);
     let picture_height = adw::Clamp::builder()
         .orientation(gtk::Orientation::Vertical)
-        .maximum_size(122)
-        .tightening_threshold(122)
+        .maximum_size(176)
+        .tightening_threshold(176)
         .child(&picture)
         .build();
     let picture_size = adw::Clamp::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .maximum_size(184)
-        .tightening_threshold(184)
+        .maximum_size(224)
+        .tightening_threshold(224)
         .child(&picture_height)
         .build();
     picture_frame.append(&picture_size);
@@ -2241,7 +2269,8 @@ fn build_review_card(
         ))
         .valign(gtk::Align::Center)
         .build();
-    rotate.add_css_class("circular");
+    rotate.add_css_class("flat");
+    rotate.add_css_class("icon-action");
     rotate.update_property(&[gtk::accessible::Property::Label(&tr_args(
         "Rotate photo {number} 90° clockwise",
         &[("number", (index + 1).to_string())],
@@ -2250,7 +2279,7 @@ fn build_review_card(
     controls.add_css_class("review-card-controls");
     controls.append(&check);
     controls.append(&rotate);
-    let card = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
     card.set_overflow(gtk::Overflow::Hidden);
     card.add_css_class("review-card");
     card.add_css_class("included");
@@ -2308,12 +2337,7 @@ fn build_review_card(
     } else {
         rotate.set_sensitive(false);
     }
-    adw::Clamp::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .maximum_size(208)
-        .tightening_threshold(208)
-        .child(&card)
-        .build()
+    card
 }
 
 fn update_review_selection_label(label: &gtk::Label, selected: usize, total: usize) {
@@ -2329,6 +2353,7 @@ fn update_review_selection_label(label: &gtk::Label, selected: usize, total: usi
 }
 
 fn drop_review(ui: &Ui) -> bool {
+    ui.scan_button.add_css_class("suggested-action");
     let had_review = ui.review_state.borrow_mut().take().is_some();
     while let Some(child) = ui.review_flow.first_child() {
         let Ok(child) = child.downcast::<gtk::FlowBoxChild>() else {
@@ -2599,6 +2624,8 @@ fn set_busy(ui: &Ui, busy: bool, status: &str) {
     ui.output_action.set_enabled(!busy);
     ui.cancel_action.set_enabled(busy);
     ui.cancel_button.set_visible(busy);
+    ui.scan_button.set_visible(!busy);
+    ui.import_button.set_visible(!busy);
     ui.progress_bar.set_visible(false);
     ui.progress_bar.set_fraction(0.0);
     ui.device_dropdown.set_sensitive(!busy);
@@ -2629,6 +2656,7 @@ fn show_error(ui: &Ui, message: &str) {
     *ui.last_error.borrow_mut() = Some(message.to_string());
     let summary = error_summary(message);
     ui.status_label.set_label(&summary);
+    ui.status_label.set_tooltip_text(Some(message));
     ui.status_label
         .announce(message, gtk::AccessibleAnnouncementPriority::High);
     let mut toast = adw::Toast::builder().title(&summary).timeout(6);
@@ -2679,6 +2707,7 @@ fn show_error_details(ui: &Ui) {
 
 fn set_status(ui: &Ui, message: &str, priority: gtk::AccessibleAnnouncementPriority) {
     ui.status_label.set_label(message);
+    ui.status_label.set_tooltip_text(Some(message));
     ui.status_label.announce(message, priority);
 }
 

@@ -1,5 +1,8 @@
+/* Native surfaces keep system accents and user theme overrides authoritative. */
 :root {
-  --photoscanner-radius: 18px;
+  --photoscanner-radius: 12px;
+  --photoscanner-border: color-mix(in srgb, currentColor 12%, transparent);
+  --photoscanner-canvas: color-mix(in srgb, var(--view-bg-color) 96%, var(--window-fg-color));
 }
 
 .app-shell {
@@ -7,85 +10,97 @@
 }
 
 .scanner-sidebar {
-  background: color-mix(in srgb, var(--window-bg-color) 90%, var(--accent-bg-color));
-  border-right: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  background: var(--sidebar-bg-color);
+  color: var(--sidebar-fg-color);
 }
 
-.scanner-sidebar .title-1 {
-  font-weight: 760;
+.scanner-sidebar headerbar {
+  background: transparent;
+}
+
+.scanner-sidebar preferencesgroup > box > box.header {
+  margin-bottom: 8px;
+}
+
+.scanner-sidebar row {
+  min-height: 52px;
+}
+
+.scanner-sidebar row .subtitle {
+  font-size: 0.9em;
 }
 
 .preview-shell {
-  background: color-mix(in srgb, var(--view-bg-color) 94%, black);
+  background: var(--window-bg-color);
 }
 
 .preview-card {
-  background: var(--card-bg-color);
+  background: var(--photoscanner-canvas);
   border-radius: var(--photoscanner-radius);
-  box-shadow: 0 8px 32px rgb(0 0 0 / 14%);
 }
 
 .review-page {
-  background: var(--card-bg-color);
+  background: var(--photoscanner-canvas);
 }
 
 .review-header {
-  padding: 14px 18px;
+  padding: 24px;
 }
 
 .review-content {
-  padding: 14px 18px 18px;
+  padding: 20px 20px 24px;
 }
 
-.review-primary-action {
-  min-height: 42px;
-  padding-left: 18px;
-  padding-right: 18px;
+.review-header .title-1 {
+  font-size: 20px;
   font-weight: 700;
 }
 
+.review-primary-action,
+.primary-action,
+.secondary-action {
+  min-height: 36px;
+  padding: 4px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
 .review-overview-card {
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--view-bg-color) 88%, var(--accent-bg-color));
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--photoscanner-border);
 }
 
 .review-overview-frame {
   padding: 8px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--view-bg-color) 92%, white);
-}
-
-.review-overview-image {
   border-radius: 8px;
+  background: var(--view-bg-color);
 }
 
 .review-selection-counter {
   color: var(--accent-color);
-  font-weight: 650;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-gallery > flowboxchild {
+  padding: 4px;
+  border-radius: var(--photoscanner-radius);
 }
 
 .review-card {
   padding: 10px;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 16px;
+  border: 1px solid var(--photoscanner-border);
+  border-radius: var(--photoscanner-radius);
   background: var(--card-bg-color);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
-  transition: 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
 .review-card:hover {
-  border-color: color-mix(in srgb, var(--accent-color) 42%, transparent);
-  background: color-mix(in srgb, var(--card-bg-color) 94%, var(--accent-bg-color));
+  border-color: color-mix(in srgb, var(--accent-color) 60%, transparent);
 }
 
 .review-card.included {
-  border-color: color-mix(in srgb, var(--accent-color) 28%, transparent);
-}
-
-.review-card.excluded {
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent-color) 38%, transparent);
 }
 
 .review-card.excluded .review-photo {
@@ -94,61 +109,50 @@
 
 .review-photo-frame {
   padding: 8px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--view-bg-color) 94%, black);
+  border-radius: 6px;
+  background: var(--view-bg-color);
 }
 
 .review-photo {
-  transition: 160ms ease;
+  transition: opacity 160ms ease;
 }
 
 .review-card-controls {
-  min-height: 40px;
+  min-height: 36px;
 }
 
 .empty-preview-icon {
-  color: var(--accent-color);
-  opacity: 0.8;
+  color: var(--window-fg-color);
+  opacity: 0.5;
+  margin-bottom: 8px;
 }
 
 .action-bar {
-  padding: 10px 14px;
-  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color));
-  box-shadow: 0 -4px 18px rgb(0 0 0 / 8%);
+  padding: 12px 18px;
+  border-top: 1px solid var(--photoscanner-border);
+  background: var(--window-bg-color);
 }
 
 .action-bar-status {
-  min-height: 46px;
-  padding-left: 12px;
-  padding-right: 12px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--card-bg-color) 88%, var(--accent-bg-color));
+  min-height: 36px;
 }
 
 .action-bar-actions button {
-  min-width: 150px;
-}
-
-.primary-action {
-  min-height: 46px;
-  border-radius: 14px;
-  font-weight: 700;
+  min-width: 136px;
 }
 
 .icon-action {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 32px;
+  min-height: 32px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .preview-shell {
-    background: color-mix(in srgb, var(--window-bg-color) 82%, black);
-  }
+.zoom-controls {
+  margin-right: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  .review-card,
+  .review-photo {
     transition: none;
   }
 }
